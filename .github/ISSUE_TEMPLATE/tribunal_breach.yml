@@ -1,0 +1,75 @@
+name: 🎮 I Broke the Tribunal
+description: Report a hallucination that the tribunal missed
+title: "[TRIBUNAL BREACH] "
+labels: ["red-team", "hallucination-missed", "priority:high"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🎮 Tribunal Breach Report
+        
+        You found a hallucination that slipped past the tribunal. This is exactly what we need to improve.
+        
+        **If this is a verified breach, you may earn Aether Trust Credits.**
+        
+  - type: textarea
+    id: prompt
+    attributes:
+      label: The prompt you submitted
+      description: The exact prompt you used
+    validations:
+      required: true
+  - type: textarea
+    id: llm-response
+    attributes:
+      label: The LLM response that was generated
+      description: The hallucinated response
+    validations:
+      required: true
+  - type: textarea
+    id: what-was-wrong
+    attributes:
+      label: What was wrong with the response?
+      description: What hallucination did the tribunal miss?
+    validations:
+      required: true
+  - type: input
+    id: trust-score
+    attributes:
+      label: Trust score the tribunal gave it
+      placeholder: "e.g., 85 (should have been lower)"
+    validations:
+      required: true
+  - type: input
+    id: expected-score
+    attributes:
+      label: What trust score SHOULD it have gotten?
+      placeholder: "e.g., 20"
+    validations:
+      required: true
+  - type: dropdown
+    id: hallucination-type
+    attributes:
+      label: Type of hallucination
+      options:
+        - Fabricated citation / section number
+        - False premise
+        - Overgeneralized / absolute claim
+        - Fabricated statistics / data
+        - Incorrect statute / law reference
+        - Mixed real and fake information
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: arena-id
+    attributes:
+      label: Arena challenge ID (if from Red-Team Arena)
+      placeholder: "arena_..."
+  - type: checkbox
+    id: reproducible
+    attributes:
+      label: I can reproduce this consistently
+      options:
+        - label: Yes, this happens every time
+        - label: Sometimes, it's intermittent

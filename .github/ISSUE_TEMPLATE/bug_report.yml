@@ -1,0 +1,63 @@
+name: Bug Report
+description: Report a bug in Aether
+title: "[BUG] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🐛 Bug Report
+        
+        Thanks for taking the time to report a bug! Please fill out the details below.
+        
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug
+      placeholder: "The verifyResponse endpoint returned..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      description: What you expected to happen
+    validations:
+      required: true
+  - type: input
+    id: endpoint
+    attributes:
+      label: Which endpoint/function?
+      placeholder: "verifyResponse, batchVerify, redTeamArena, etc."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Code or commands to reproduce
+      render: bash
+    validations:
+      required: true
+  - type: dropdown
+    id: verdict
+    attributes:
+      label: Was the tribunal verdict correct?
+      options:
+        - Yes, the verdict was correct
+        - No, the tribunal missed a hallucination
+        - No, the tribunal flagged something that was actually correct
+        - N/A — not a tribunal issue
+    validations:
+      required: true
+  - type: input
+    id: trust-score
+    attributes:
+      label: Trust score (if applicable)
+      placeholder: "0-100"
+  - type: input
+    id: warrant-id
+    attributes:
+      label: Warrant ID (if applicable)
+      placeholder: "6a6de04b..."

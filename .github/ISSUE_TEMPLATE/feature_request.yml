@@ -1,0 +1,54 @@
+name: Feature Request
+description: Suggest a new feature for Aether
+title: "[FEATURE] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## ✨ Feature Request
+        
+        Got an idea to make Aether better? Tell us about it!
+        
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What can't you do today that you want to do?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What do you propose?
+      description: Your proposed solution or feature
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+      options:
+        - API endpoints
+        - Chrome extension
+        - GitHub Action
+        - SDK / Client library
+        - Tribunal engine
+        - Playground UI
+        - Red-Team Arena
+        - Multi-Model comparison
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - Critical — I'm blocked without this
+        - High — Would significantly improve my workflow
+        - Medium — Nice to have
+        - Low — Whenever you get to it
+    validations:
+      required: true
