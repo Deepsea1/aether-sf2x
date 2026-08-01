@@ -1,0 +1,35 @@
+name: 'Aether Hallucination Guard'
+description: 'Verify AI responses in your CI/CD pipeline. Fails the build if hallucinations are detected.'
+author: 'SF2X'
+branding:
+  icon: 'shield'
+  color: 'black'
+
+inputs:
+  api-key:
+    description: 'Aether API key'
+    required: false
+    default: ''
+  text:
+    description: 'Text to verify (or path to a file containing text)'
+    required: true
+  threshold:
+    description: 'Minimum trust score to pass (0-100)'
+    required: false
+    default: '80'
+  fail-on-contested:
+    description: 'Fail the build if verdict is "contested" (not just "rejected")'
+    required: false
+    default: 'false'
+
+outputs:
+  trust-score:
+    description: 'Trust score of the verified text (0-100)'
+  verdict:
+    description: 'Tribunal verdict (verified, contested, rejected)'
+  corrections:
+    description: 'JSON array of corrections issued by the tribunal'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
