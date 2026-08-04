@@ -23,7 +23,7 @@ Would you be open to a 15-minute walkthrough?
 Best,
 Cameron Piper
 Aether by SF2X
-https://aether.sf2x.ai
+https://aether.sf2x.com
 
 ---
 
@@ -49,7 +49,7 @@ Happy to show you the benchmark data and a live demo. 15 minutes.
 Best,
 Cameron Piper
 Aether by SF2X
-https://aether.sf2x.ai
+https://aether.sf2x.com
 
 ---
 
@@ -76,7 +76,7 @@ Want early access before we go public?
 Best,
 Cameron Piper
 Aether by SF2X
-https://aether.sf2x.ai
+https://aether.sf2x.com
 
 ---
 
@@ -107,7 +107,7 @@ The tribunal catches:
 
 We're building a public playground where you can submit any question and watch the tribunal render a verdict. The benchmark methodology, correlation audit, and tribunal lift data are all open.
 
-Try it: https://aether.sf2x.ai/playground
-Benchmark: https://aether.sf2x.ai/benchmark
+Try it: https://aether.sf2x.com/playground
+Benchmark: https://aether.sf2x.com/benchmark
 
 ---
