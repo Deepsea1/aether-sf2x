@@ -19,7 +19,7 @@ Products include:
 • Public playground for transparent tribunal debates
 • Open benchmark leaderboard
 
-Website: https://aether.sf2x.ai
+Website: https://aether.sf2x.com
 
 ## Industry
 Software Development / AI Safety
@@ -53,6 +53,6 @@ If your team is deploying LLMs without verification, you're shipping 86% halluci
 
 Don't trust. Verify.
 
-🔗 https://aether.sf2x.ai
+🔗 https://aether.sf2x.com
 
 #AI #AISafety #LLM #Hallucination #MachineLearning #ArtificialIntelligence #TechStartups
