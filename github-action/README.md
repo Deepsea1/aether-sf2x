@@ -89,7 +89,7 @@ jobs:
 
 ## Get Your API Key
 
-1. Go to https://aether.sf2x.ai/api-docs
+1. Go to https://aether.sf2x.com/api-docs
 2. Sign up for a free account (100 verifications/month)
 3. Generate an API key
 4. Add it as a GitHub secret: `AETHER_API_KEY`
