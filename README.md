@@ -55,7 +55,7 @@ Free ($0, 100/mo) · Starter ($399, 5K) · Pro ($1,999, 25K) · Enterprise ($9,9
 
 ## 🔗 Links
 
-- Live App: https://aether.sf2x.ai
+- Live App: https://aether.sf2x.com
 - Full API Docs: [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md)
 - Integration Guide: [`docs/INTEGRATION_GUIDE.md`](docs/INTEGRATION_GUIDE.md)
 - GitHub Action: [`github-action/README.md`](github-action/README.md)
