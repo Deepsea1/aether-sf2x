@@ -32,7 +32,7 @@
    Injects a seamless *"Verify with Aether"* button directly next to AI chat responses on popular platforms. With one click, users can run an instant tribunal check without leaving their workflow.
 
 3. **Audit-Ready Warrants & Interactive Public Playground**
-   Every verified output produces a cryptographic warrant detailing verified premises, validated source citations, and signed hashes. Test prompts in real time on our public playground (`https://aether.sf2x.ai/playground`) or audit historical debate logs.
+   Every verified output produces a cryptographic warrant detailing verified premises, validated source citations, and signed hashes. Test prompts in real time on our public playground (`https://aether.sf2x.com/playground`) or audit historical debate logs.
 
 ---
 
@@ -66,7 +66,7 @@ We benchmarked Aether against standard LLM setups across adversarial datasets:
 ### Try It Yourself Today 🚀
 We wanted to make AI trust accessible to everyone:
 1. **Chrome Extension**: Adds a "Verify with Aether" button next to any response on ChatGPT, Claude, and Gemini. Catch hallucinations in your web browser with a single click.
-2. **Public Playground**: Visit [aether.sf2x.ai/playground](https://aether.sf2x.ai/playground) to test your own prompts, watch the tribunal debate in real time, and inspect complete cryptographic warrants.
+2. **Public Playground**: Visit [aether.sf2x.com/playground](https://aether.sf2x.com/playground) to test your own prompts, watch the tribunal debate in real time, and inspect complete cryptographic warrants.
 
 We'd love for the PH community to give it a spin! What's the wildest hallucination you've caught an AI generating? Let us know your thoughts, feedback, and questions below—I'll be here all day replying!
 
@@ -107,7 +107,7 @@ To convert visitors into upvoters and users, upload 5–6 crisp, 16:9 ratio scre
 | **2** | **Benchmark Performance Comparison** | A clean bar chart comparing Plain LLM (14/100), Vanilla RAG (28/100), Baseline (39/100), and Aether Tribunal (91/100). Highlight key metrics: **AUC 1.0** and **Pearson r = 0.98**. |
 | **3** | **3-Model Tribunal Flow Diagram** | An architectural visualization showing the step-by-step pipeline: **Input Prompt → Proposer → Critic (Red-Team Audit) → Verifier → Signed Cryptographic Warrant**. |
 | **4** | **Chrome Extension In-Action** | Screenshot showing ChatGPT / Claude interface with the injected **"✓ Verify with Aether"** button and an expanded side-drawer displaying real-time fact-checking results. |
-| **5** | **Public Playground UI** | Full-screen screenshot of the interactive public playground (`aether.sf2x.ai/playground`) showing a live prompt input, tribunal debate transcript, and trust score output. |
+| **5** | **Public Playground UI** | Full-screen screenshot of the interactive public playground (`aether.sf2x.com/playground`) showing a live prompt input, tribunal debate transcript, and trust score output. |
 | **6** | **Trust Warrant & Audit Detail** | Detailed close-up of an Aether Verification Warrant showing premise decomposition, source citations, and cryptographic signed hash. |
 
 ---
