@@ -46,7 +46,7 @@ Every answer gets a cryptographic warrant with premises, sources, and a signed h
 - Researchers interested in the dataset
 - Suggestions for improving the red-team loop
 
-Links: https://aether.sf2x.ai/benchmark | https://aether.sf2x.ai/playground
+Links: https://aether.sf2x.com/benchmark | https://aether.sf2x.com/playground
 
 Happy to answer questions about the tribunal architecture, benchmark methodology, or the red-team adversarial loop.
 
