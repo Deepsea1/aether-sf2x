@@ -32,7 +32,7 @@
 
 **Voiceover:** "Install the Chrome extension. Or try the public playground — watch 3 AIs debate whether the answer is true."
 
-**Visual:** Aether logo, URL: aether.sf2x.ai
+**Visual:** Aether logo, URL: aether.sf2x.com
 
 **Voiceover:** "Don't trust. Verify. Aether by SF2X."
 
@@ -42,4 +42,4 @@
 - Music: Minimal, building tension in Scene 1, resolving in Scene 3
 - Voice: Calm, confident, not salesy
 - Key stat to flash: "86% hallucination rate → 91/100 trust score"
-- End card: aether.sf2x.ai + "Verify with Aether" button mockup
+- End card: aether.sf2x.com + "Verify with Aether" button mockup
