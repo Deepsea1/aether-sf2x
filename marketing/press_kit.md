@@ -50,15 +50,15 @@ Every answer gets a **cryptographic warrant** — premises, sources, and a signe
 ### Founder
 **Cameron Piper** — Founder & Builder, SF2X
 Email: campiper84@gmail.com
-Website: https://aether.sf2x.ai
+Website: https://aether.sf2x.com
 
 ### Key Links
-- Live App: https://aether.sf2x.ai
-- Benchmark: https://aether.sf2x.ai/benchmark
-- Playground: https://aether.sf2x.ai/playground
-- API Docs: https://aether.sf2x.ai/api-docs
+- Live App: https://aether.sf2x.com
+- Benchmark: https://aether.sf2x.com/benchmark
+- Playground: https://aether.sf2x.com/playground
+- API Docs: https://aether.sf2x.com/api-docs
 - Chrome Extension: [Download link]
-- Pricing: https://aether.sf2x.ai/pricing
+- Pricing: https://aether.sf2x.com/pricing
 
 ### Social Media
 - Twitter/X: [@SF2X]
