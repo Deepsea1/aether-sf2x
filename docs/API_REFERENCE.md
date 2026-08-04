@@ -18,7 +18,7 @@ All API requests require a valid API key. Include your API key in the `Authoriza
 Authorization: Bearer YOUR_API_KEY
 ```
 
-Get your API key from the Aether dashboard at https://aether.sf2x.ai/api-docs.
+Get your API key from the Aether dashboard at https://aether.sf2x.com/api-docs.
 
 ## Endpoints
 
@@ -286,7 +286,7 @@ The extension injects a "Verify with Aether" button next to AI responses. Click 
 
 ## Support
 
-- API Docs: https://aether.sf2x.ai/api-docs
-- Benchmark: https://aether.sf2x.ai/benchmark
-- Playground: https://aether.sf2x.ai/playground
+- API Docs: https://aether.sf2x.com/api-docs
+- Benchmark: https://aether.sf2x.com/benchmark
+- Playground: https://aether.sf2x.com/playground
 - Email: campiper84@gmail.com
