@@ -35,7 +35,7 @@ To maximize viral distribution on Product Hunt, Hacker News, X (Twitter), and Re
 - **Implementation Recommendation**:
   - **Embed Widget (`aether-badge.js`)**: Create a lightweight (<5KB) JS snippet that renders a sleek badge:
     ```html
-    <script src="https://aether.sf2x.ai/badge.js" data-warrant-id="warrant_8f42a1" data-theme="dark"></script>
+    <script src="https://aether.sf2x.com/badge.js" data-warrant-id="warrant_8f42a1" data-theme="dark"></script>
     ```
     Clicking the badge opens an interactive modal displaying the 3-model breakdown and source citations without leaving the hosting site.
   - **Dynamic OG Card Endpoint**: Implement an OG image generator endpoint (`GET /api/og/warrant/:warrant_id.png`) using `satori` or `puppeteer-core` to dynamically render image previews containing the Trust Score badge, model names, and timestamp for social media crawlers.
