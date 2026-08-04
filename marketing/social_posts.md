@@ -79,16 +79,16 @@ Submit any question. Watch the tribunal debate it in real time:
 
 It's like watching 3 AIs argue about whether the first one is lying.
 
-https://aether.sf2x.ai/playground
+https://aether.sf2x.com/playground
 
 **Tweet 9 (CTA)**
 Benchmark data, methodology, and tribunal lift audits are all public.
 
-See how your system compares: https://aether.sf2x.ai/benchmark
+See how your system compares: https://aether.sf2x.com/benchmark
 
 Pricing starts at $0 (free tier, 500 API calls) → $399/mo Pro → $1,999 Enterprise → $9,999 Scale
 
-We're preparing for public launch. Try it: https://aether.sf2x.ai
+We're preparing for public launch. Try it: https://aether.sf2x.com
 
 ---
 
@@ -120,9 +120,9 @@ We're launching a public playground where anyone can submit a question and watch
 
 If your team is deploying LLMs in production without verification, you're shipping 86% hallucinations and calling it features.
 
-Benchmark: https://aether.sf2x.ai/benchmark
-Playground: https://aether.sf2x.ai/playground
-Pricing: https://aether.sf2x.ai/pricing
+Benchmark: https://aether.sf2x.com/benchmark
+Playground: https://aether.sf2x.com/playground
+Pricing: https://aether.sf2x.com/pricing
 
 #AI #LLM #TrustWorthyAI #AISafety #Hallucination #MachineLearning #AIGovernance
 
@@ -168,8 +168,8 @@ The loop generates adversarial attacks against the system continuously and feeds
 - Trust score collapse (detects when a model's confidence is high but claims are unsupported)
 
 **What's public:**
-- Benchmark leaderboard: https://aether.sf2x.ai/benchmark
-- Tribunal playground (submit a question, watch the verdict): https://aether.sf2x.ai/playground
+- Benchmark leaderboard: https://aether.sf2x.com/benchmark
+- Tribunal playground (submit a question, watch the verdict): https://aether.sf2x.com/playground
 - Pricing: Free tier (500 API calls) → Pro $399/mo → Enterprise $1,999/mo → Scale $9,999/mo
 
 Happy to answer questions about the methodology, the tribunal architecture, or the benchmark.
@@ -198,8 +198,8 @@ The red-team loop is what makes the difference: 91/100 with it, 58/100 without. 
 
 We're launching a public playground where you can submit questions and watch the tribunal work. Would love feedback from the community on the methodology and whether this approach scales.
 
-Playground: https://aether.sf2x.ai/playground
-Benchmark: https://aether.sf2x.ai/benchmark
+Playground: https://aether.sf2x.com/playground
+Benchmark: https://aether.sf2x.com/benchmark
 
 ---
 
@@ -217,6 +217,6 @@ Every answer gets a warrant with sources and a signed hash. The tribunal catches
 
 Public playground launching soon — submit a question, watch 3 AIs debate whether the first one is telling the truth.
 
-https://aether.sf2x.ai
+https://aether.sf2x.com
 
 ---
