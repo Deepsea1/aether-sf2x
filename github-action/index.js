@@ -69,7 +69,7 @@ async function run() {
 
     if (result.warrant_id) {
       core.info(`   Warrant: ${result.warrant_id}`);
-      core.info(`   View: https://aether.sf2x.ai/verify/${result.warrant_id}`);
+      core.info(`   View: https://aether.sf2x.com/verify/${result.warrant_id}`);
     }
 
     // Check threshold
