@@ -1,4 +1,4 @@
-# SEO Audit — Aether by SF2X (aether.sf2x.ai)
+# SEO Audit — Aether by SF2X (aether.sf2x.com)
 
 ## CRITICAL ISSUES
 
@@ -22,7 +22,7 @@ Social sharing (Twitter, LinkedIn, Discord) shows no preview image or descriptio
 <meta property="og:title" content="Aether by SF2X — Don't Trust. Verify.">
 <meta property="og:description" content="AI hallucination detection with a 3-model tribunal. 91/100 trustworthiness. AUC 1.0. Chrome extension for ChatGPT, Claude & Gemini.">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://aether.sf2x.ai">
+<meta property="og:url" content="https://aether.sf2x.com">
 <meta property="og:image" content="[OG preview image URL]">
 <meta property="og:site_name" content="Aether by SF2X">
 ```
@@ -46,7 +46,7 @@ No Schema.org markup for the product/organization.
   "@type": "SoftwareApplication",
   "name": "Aether by SF2X",
   "description": "AI trust verification layer that catches LLM hallucinations using a 3-model tribunal.",
-  "url": "https://aether.sf2x.ai",
+  "url": "https://aether.sf2x.com",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Web",
   "offers": {
@@ -66,7 +66,7 @@ No Schema.org markup for the product/organization.
 
 1. **Add meta tags via the Aether app builder** — send a builder message asking to add SEO tags to the `<head>`
 2. **Generate an OG preview image** — a 1200x630px image with the Aether logo, tagline "Don't Trust. Verify.", and key stat "91/100 — AUC 1.0"
-3. **Add canonical URLs** — each page should have `<link rel="canonical" href="https://aether.sf2x.ai/page">`
+3. **Add canonical URLs** — each page should have `<link rel="canonical" href="https://aether.sf2x.com/page">`
 4. **Add structured data** for the benchmark leaderboard as a Dataset type
 5. **Target keywords:** "AI hallucination detection", "LLM verification", "AI trust score", "hallucination checker", "ChatGPT fact check"
 
