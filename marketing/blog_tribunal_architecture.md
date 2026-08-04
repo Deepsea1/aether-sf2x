@@ -77,10 +77,10 @@ The tribunal catches them because the Critic is actively looking for what's wron
 ## Try It
 
 The tribunal is live. You can:
-- **Watch it debate** at our [public playground](https://aether.sf2x.ai/playground)
-- **Check our benchmark** at the [leaderboard](https://aether.sf2x.ai/benchmark)
-- **Integrate it** via our [API](https://aether.sf2x.ai/api-docs)
-- **Add it to your browser** with our [Chrome extension](https://aether.sf2x.ai/extension)
+- **Watch it debate** at our [public playground](https://aether.sf2x.com/playground)
+- **Check our benchmark** at the [leaderboard](https://aether.sf2x.com/benchmark)
+- **Integrate it** via our [API](https://aether.sf2x.com/api-docs)
+- **Add it to your browser** with our [Chrome extension](https://aether.sf2x.com/extension)
 
 Don't trust. Verify.
 
