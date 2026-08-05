@@ -49,7 +49,7 @@ Every answer gets a **cryptographic warrant** — premises, sources, and a signe
 
 ### Founder
 **Cameron Piper** — Founder & Builder, SF2X
-Email: campiper84@gmail.com
+Email: cam@sf2x.com
 Website: https://aether.sf2x.com
 
 ### Key Links

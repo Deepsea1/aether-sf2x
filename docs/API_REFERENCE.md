@@ -289,4 +289,4 @@ The extension injects a "Verify with Aether" button next to AI responses. Click 
 - API Docs: https://aether.sf2x.com/api-docs
 - Benchmark: https://aether.sf2x.com/benchmark
 - Playground: https://aether.sf2x.com/playground
-- Email: campiper84@gmail.com
+- Email: cam@sf2x.com
