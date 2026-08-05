@@ -5,16 +5,48 @@ description: >-
   tools, which proxy a claim to an upstream tribunal that decomposes it,
   cross-examines it (proposer/critic/verifier + red-team), scores trust, and
   returns a cryptographically signed warrant. Use whenever the user wants to
-  fact-check, verify, trust-check, or validate an AI answer or claim before
-  relying on it; guard against hallucination or fabrication; get a trust score,
-  verdict, certification, or signed warrant/attestation; audit a claim
-  (optionally with source URLs); or re-explain or fetch the full proof of a
-  prior check by its verification_id. Fires on: verify, fact-check, trust score,
-  hallucination, warrant, attestation, certified, "is this true", "can I trust
-  this", audit this claim, get the proof. NOT for general web search or finding
-  citations (use a search skill), and NOT for running the tribunal locally —
-  Aether is a thin proxy in front of the Base44 engine and cannot regenerate a
-  warrant it never cached.
+  fact-check, verify, trust-check, validate, confirm, corroborate, vet, or
+  audit an AI answer, claim, statement, citation, quote, figure, or response
+  before relying on it; guard against hallucination, fabrication,
+  confabulation, or made-up facts; get a trust score, verdict, certification,
+  or signed warrant / attestation / proof / receipt; or re-explain or fetch the
+  full proof of a prior check by its verification_id. Fires on: verify, verify
+  this, verify the answer, verify the claim, verification, reverify, fact-check,
+  fact check, factcheck, check the facts, check this, check that, double-check,
+  double check, triple-check, cross-check, cross-reference, sanity-check, sanity
+  check, gut-check, reality-check, spot-check, validate, validation, confirm,
+  confirm this, corroborate, substantiate, verify accuracy, vet, vet this, vet
+  the claim, audit, audit this, audit this claim, review this claim, scrutinize,
+  interrogate the claim; trust score, trustworthy, trustworthiness, trust
+  check, trust-check, how trustworthy, can I trust this, should I trust this, do
+  I trust this, is this reliable, reliability, is this legit, is this
+  legitimate, is this solid; is this true, is that true, is this real, is this
+  accurate, is this correct, is that right, is this factual, is this right, does
+  this check out, holds up, accuracy, correctness, veracity, truthfulness; is
+  this a hallucination, hallucination, hallucinate, hallucinating, made up,
+  made-up, making it up, is it making this up, fabricated, fabrication,
+  confabulation, invented, not real, bogus, is this BS, is this nonsense, is
+  this wrong, could this be wrong, catch errors, catch mistakes, catch
+  falsehoods, flag hallucinations, spot the lie, find the error; warrant,
+  attestation, attest, attested, certified, certification, signed proof,
+  cryptographic proof, proof, receipt, signed receipt, evidence, evidence
+  trail, provenance, signed hash, get the proof, get the warrant, pull the
+  warrant, show me the warrant, fetch the warrant, look up the warrant, explain
+  the verdict, explain this verdict, why was it rejected, why contested, why is
+  the score low, what did it flag, look up a verification, by verification_id,
+  by warrant id; guard against, guardrail, safety-check, before I rely on this,
+  before I send this, before I ship this, before I publish this, before I cite
+  this, before I quote this, before I act on this, before I trust this, is this
+  safe to use, is this answer safe; the AI said, the model said, ChatGPT said,
+  Claude said, the chatbot said, an LLM told me, LLM output, model output, AI
+  output, this answer, this response; check this source, does this source
+  support the claim, is this grounded, is it grounded, source-backed, backed by
+  sources, grounding, run it through Aether, run Aether, verify with Aether,
+  check with Aether, Aether check, use Aether, ask Aether. NOT for general web
+  search or finding new citations from scratch (use a search / research skill —
+  Aether checks a claim you already have, it does not go find one), and NOT for
+  running the tribunal locally — Aether is a thin proxy in front of the Base44
+  engine and cannot regenerate a warrant it never cached.
 allowed-tools: mcp__aether__verify_claim mcp__aether__explain_verdict mcp__aether__get_warrant
 license: MIT
 metadata:
