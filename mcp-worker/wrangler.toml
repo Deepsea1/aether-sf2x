@@ -1,0 +1,19 @@
+name = "aether-mcp"
+main = "worker.js"
+compatibility_date = "2026-08-01"
+
+# Aether warrantApi endpoint (Base44 backend function).
+# Live-probed 2026-08-05: the api.base44.com/apps/<id>/backend/functions base from
+# the public API docs fails behind a Base44 ConnectYourDomain error page; the
+# app-domain route below is the one that answers (401 without x-api-key).
+[vars]
+AETHER_WARRANT_API_URL = "https://aether.sf2x.com/api/functions/warrantApi"
+
+# KV namespace for caching verdicts (durable warrant lookup, 30-day TTL).
+[[kv_namespaces]]
+binding = "WARRANTS"
+id = "be47789edec3442384120494410551b8"
+
+# Secrets — do NOT put these in this file. Set them via CLI:
+#   npx wrangler secret put AETHER_API_KEY        (an active sk_sf2x_... key from aether.sf2x.com Developer Keys)
+#   npx wrangler secret put AETHER_MCP_TOKEN      (long random string; the bearer token Claude presents)
