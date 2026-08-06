@@ -1,0 +1,43 @@
+{
+  "manifest_version": "0.2",
+  "name": "aether-verify",
+  "display_name": "Aether Verify (SF2X Truth Tribunal)",
+  "version": "1.0.0",
+  "description": "verify_claim / explain_verdict / get_warrant against the live aether-mcp worker — signed warrants, trust scores, honest verdicts.",
+  "author": {
+    "name": "Cam Piper"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "node_modules/mcp-remote/dist/proxy.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/node_modules/mcp-remote/dist/proxy.js",
+        "https://aether-mcp.campiper84.workers.dev",
+        "--header",
+        "Authorization:${AETHER_AUTH_HEADER}"
+      ],
+      "env": {
+        "AETHER_AUTH_HEADER": "${user_config.auth_header}"
+      }
+    }
+  },
+  "tools": [
+    { "name": "verify_claim", "description": "Run a claim through the aether truth tribunal; returns verdict, trust score, and a signed warrant." },
+    { "name": "explain_verdict", "description": "Explain a prior verdict from its warrant." },
+    { "name": "get_warrant", "description": "Fetch a signed warrant by id." }
+  ],
+  "user_config": {
+    "auth_header": {
+      "type": "string",
+      "title": "Aether auth header value",
+      "description": "The exact Authorization header value for the aether-mcp worker. Copy it from D:\\aether-sf2x\\mcp-worker\\.env.local — never share it in chat.",
+      "sensitive": true,
+      "required": true
+    }
+  },
+  "compatibility": {
+    "platforms": ["win32", "darwin"]
+  }
+}
