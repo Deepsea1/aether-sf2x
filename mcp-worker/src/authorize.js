@@ -25,7 +25,19 @@ export const defaultHandler = {
     if (url.pathname !== '/authorize') {
       return new Response('Not found', { status: 404 });
     }
-    if (request.method === 'GET') return renderApprovalPage(request, env, null);
+    if (request.method === 'GET') {
+      // Rate-limit the GET too: rendering the page does a CIMD lookupClient()
+      // outbound fetch, so an unauthenticated caller shouldn't be able to spam it.
+      const ip = request.headers.get('cf-connecting-ip') || 'noip';
+      const rl = await checkRateLimit(env, 'authz-get', ip);
+      if (rl.limited) {
+        return new Response('Too Many Requests', {
+          status: 429,
+          headers: { 'Retry-After': String(rl.retryAfter) },
+        });
+      }
+      return renderApprovalPage(request, env, null);
+    }
     if (request.method === 'POST') return handleApprovalPost(request, env, ctx);
     return new Response('Method Not Allowed', { status: 405 });
   },

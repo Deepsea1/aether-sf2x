@@ -43,3 +43,7 @@ id = "37b221de5d8c41219fb879b1566f21ba"
 #   npx wrangler secret put AETHER_API_KEY        (an active sk_sf2x_... key from aether.sf2x.com Developer Keys)
 #   npx wrangler secret put AETHER_MCP_TOKEN      (long random string; the static bearer legacy clients present)
 #   npx wrangler secret put AETHER_OAUTH_SECRET   (long random string; the shared secret gating the /authorize approval page)
+
+# Daily purge of expired OAuth grants/tokens (drives the scheduled() handler in worker.js).
+[triggers]
+crons = ["0 3 * * *"]
