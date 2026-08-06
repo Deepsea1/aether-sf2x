@@ -265,7 +265,7 @@ async function dispatchOne(msg, env) {
 // `identity` is the rate-limit key (static-token hash, or the OAuth userId).
 // ───────────────────────────────────────────────────────────────────────────
 
-export async function runMcp(req, env, ctx, identity) {
+export async function runMcp(req, env, ctx, identity, opts = {}) {
   const ip = req.headers.get('cf-connecting-ip') || 'noip';
 
   let body;
@@ -292,6 +292,18 @@ export async function runMcp(req, env, ctx, identity) {
     }
   }
 
+  // Streamable-HTTP clients (the claude.ai OAuth connector) accept text/event-stream
+  // and will cut a slow single-shot JSON response mid-flight. When the caller opts
+  // into SSE, stream the reply with periodic heartbeats so the multi-second tribunal
+  // call stays alive to completion. The legacy bearer path leaves opts.sse unset →
+  // unchanged single-JSON response, so the .mcpb / Claude Code clients are untouched.
+  if (opts.sse && !Array.isArray(body)) {
+    return sseResponse(async (send) => {
+      const rpc = await dispatchOne(body, env);
+      if (rpc && !rpc.noId) send(rpc);
+    });
+  }
+
   // Batch requests (array) — handle each, return an array. (Rare for MCP clients.)
   if (Array.isArray(body)) {
     const out = await Promise.all(body.map((b) => dispatchOne(b, env)));
@@ -313,6 +325,46 @@ function jsonResponse(obj, status = 200, extraHeaders = {}) {
   });
 }
 
+// SSE response for MCP Streamable-HTTP clients that can idle-close a slow single
+// JSON reply. Opens the stream immediately, heartbeats every 5s while the tool
+// runs, then emits the JSON-RPC result as one `message` event and closes. Runs
+// fire-and-forget: the Workers runtime keeps the isolate alive while the response
+// body stream is open, so no waitUntil is required.
+function sseResponse(produce) {
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const enc = new TextEncoder();
+  const raw = (s) => writer.write(enc.encode(s)).catch(() => {});
+  const send = (obj) => raw(`event: message\ndata: ${JSON.stringify(obj)}\n\n`);
+  (async () => {
+    raw(': open\n\n'); // flush headers right away so the client never idle-closes
+    let done = false;
+    (async () => {
+      while (!done) {
+        await new Promise((r) => setTimeout(r, 5000));
+        if (!done) raw(': keep-alive\n\n');
+      }
+    })();
+    try {
+      await produce(send);
+    } catch {
+      send(jsonRpcError(null, -32603, 'internal error'));
+    } finally {
+      done = true;
+      await writer.close().catch(() => {});
+    }
+  })();
+  return new Response(readable, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // mcpApiHandler — the OAuth-protected handler the provider mounts at apiRoute.
 // The provider validates the OAuth token and injects ctx.props before calling us.
@@ -321,6 +373,6 @@ function jsonResponse(obj, status = 200, extraHeaders = {}) {
 export const mcpApiHandler = {
   async fetch(request, env, ctx) {
     const userId = ctx && ctx.props && ctx.props.userId ? String(ctx.props.userId) : 'owner';
-    return runMcp(request, env, ctx, `oauth:${userId}`);
+    return runMcp(request, env, ctx, `oauth:${userId}`, { sse: true });
   },
 };
