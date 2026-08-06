@@ -65,6 +65,11 @@ jobs:
             sort -u "export/$E.jsonl" -o "export/$E.jsonl"
             echo "$E: $(wc -l < "export/$E.jsonl") records"
           done
+          TOTAL=0
+          for E in $ENTITIES; do TOTAL=$((TOTAL + $(wc -l < "export/$E.jsonl"))); done
+          if [ "$TOTAL" = "0" ]; then
+            echo "::warning::0 records across all entities — either the vault is truly empty, or the key was silently ignored (Base44 answers 200 [] to bad keys too). Cross-check entity counts in the Base44 dashboard."
+          fi
           tar -czf "aether-warrants-$STAMP.tar.gz" export
           if [ -n "${PASS:-}" ]; then
             gpg --batch --yes --passphrase "$PASS" -c "aether-warrants-$STAMP.tar.gz"
