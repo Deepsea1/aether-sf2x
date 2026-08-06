@@ -43,7 +43,7 @@ jobs:
           KEY: ${{ secrets.BASE44_APP_API_KEY }}
           PASS: ${{ secrets.BACKUP_PASSPHRASE }}
           APP: 6a6babb38b48187e5d4799c4
-          ENTITIES: "Warrant ApiKey"
+          ENTITIES: "Warrant ApiKey ApiUsage"
         run: |
           set -euo pipefail
           STAMP="$(date -u +%Y%m%d-%H%M%S)"
