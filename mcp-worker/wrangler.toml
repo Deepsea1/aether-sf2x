@@ -1,6 +1,9 @@
 name = "aether-mcp"
 main = "worker.js"
 compatibility_date = "2026-08-01"
+# CIMD outbound metadata fetch must use public routing (SSRF hardening for the
+# client_id metadata documents the OAuth provider fetches from claude.ai).
+compatibility_flags = ["global_fetch_strictly_public"]
 
 # Aether warrantApi endpoint (Base44 backend function).
 # Live-probed 2026-08-05: the api.base44.com/apps/<id>/backend/functions base from
@@ -8,12 +11,35 @@ compatibility_date = "2026-08-01"
 # app-domain route below is the one that answers (401 without x-api-key).
 [vars]
 AETHER_WARRANT_API_URL = "https://aether.sf2x.com/api/functions/warrantApi"
+# Canonical public origin — the canonical OAuth resource (audience) is this + "/mcp".
+# Single source of truth for src/oauth.js. Keep it equal to the deployed worker URL.
+MCP_PUBLIC_URL = "https://aether-mcp.campiper84.workers.dev"
+# Rate-limit caps (denial-of-wallet guard). Optional overrides; sane defaults live
+# in src/ratelimit.js (20/min, 200/day) if these are removed.
+RL_PER_MIN = "20"
+RL_PER_DAY = "200"
 
 # KV namespace for caching verdicts (durable warrant lookup, 30-day TTL).
 [[kv_namespaces]]
 binding = "WARRANTS"
 id = "be47789edec3442384120494410551b8"
 
+# OAuth 2.1 storage — grants, hashed tokens, encrypted props. The binding name is
+# REQUIRED to be OAUTH_KV (the provider looks it up by that literal name).
+# Create it and paste its id here before the real deploy (see README).
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "09b30bccc3ed46ec87c63f1ec63b8be0"
+
+# Rate-limit + /authorize brute-force counters (short-TTL keys, separate from the
+# verdict cache). Create it and paste its id here before the real deploy. If this
+# binding is absent at runtime the limiter falls back to the WARRANTS namespace
+# (rl: key prefix); a dedicated namespace is cleaner.
+[[kv_namespaces]]
+binding = "RL_KV"
+id = "37b221de5d8c41219fb879b1566f21ba"
+
 # Secrets — do NOT put these in this file. Set them via CLI:
 #   npx wrangler secret put AETHER_API_KEY        (an active sk_sf2x_... key from aether.sf2x.com Developer Keys)
-#   npx wrangler secret put AETHER_MCP_TOKEN      (long random string; the bearer token Claude presents)
+#   npx wrangler secret put AETHER_MCP_TOKEN      (long random string; the static bearer legacy clients present)
+#   npx wrangler secret put AETHER_OAUTH_SECRET   (long random string; the shared secret gating the /authorize approval page)
