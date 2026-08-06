@@ -1,0 +1,85 @@
+name: backup-warrants
+# Nightly export of Aether's Base44 entities (Warrant = the durable signed proof
+# artifacts; ApiKey = developer key records) to an encrypted GitHub artifact.
+# The Base44 app (6a6babb38b48187e5d4799c4) is the source of truth and lives
+# outside any git repo — this is its only off-platform backup. This job is a
+# NO-OP (skips cleanly) until the BASE44_APP_API_KEY secret is set, so it is
+# safe to commit before the secret exists.
+#
+# SET UP (repo -> Settings -> Secrets and variables -> Actions):
+#   BASE44_APP_API_KEY  Base44 dashboard -> this app -> API keys. NOTE: this is
+#                       Base44's own app key (entities REST auth), NOT an
+#                       aether.sf2x.com sk_sf2x_ developer key.
+#   BACKUP_PASSPHRASE   already set 2026-08-06 — same passphrase as the SF2X
+#                       brain backup, so one password-manager entry covers both.
+
+on:
+  schedule:
+    - cron: '47 8 * * *'   # 08:47 UTC daily (offset from the SF2X brain backup at 08:17)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Guard — is the Base44 key configured?
+        id: guard
+        env:
+          KEY: ${{ secrets.BASE44_APP_API_KEY }}
+        run: |
+          if [ -z "${KEY:-}" ]; then
+            echo "BASE44_APP_API_KEY not set — skipping (expected until the secret is added)."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Export entities + encrypt
+        if: steps.guard.outputs.run == 'true'
+        env:
+          KEY: ${{ secrets.BASE44_APP_API_KEY }}
+          PASS: ${{ secrets.BACKUP_PASSPHRASE }}
+          APP: 6a6babb38b48187e5d4799c4
+          ENTITIES: "Warrant ApiKey"
+        run: |
+          set -euo pipefail
+          STAMP="$(date -u +%Y%m%d-%H%M%S)"
+          mkdir -p export
+          for E in $ENTITIES; do
+            : > "export/$E.jsonl"
+            SKIP=0
+            for PAGE in $(seq 1 200); do
+              HTTP=$(curl -sS -m 60 -o page.json -w '%{http_code}' \
+                -H "api_key: $KEY" \
+                "https://app.base44.com/api/apps/$APP/entities/$E?limit=500&skip=$SKIP")
+              [ "$HTTP" = "200" ] || { echo "::error::$E export failed (HTTP $HTTP)"; exit 1; }
+              N=$(jq 'length' page.json)
+              jq -c '.[]' page.json >> "export/$E.jsonl"
+              SKIP=$((SKIP+500))
+              [ "$N" -lt 500 ] && break
+            done
+            # Defensive dedupe in case the API ignores `skip` and repeats pages.
+            sort -u "export/$E.jsonl" -o "export/$E.jsonl"
+            echo "$E: $(wc -l < "export/$E.jsonl") records"
+          done
+          tar -czf "aether-warrants-$STAMP.tar.gz" export
+          if [ -n "${PASS:-}" ]; then
+            gpg --batch --yes --passphrase "$PASS" -c "aether-warrants-$STAMP.tar.gz"
+            rm -f "aether-warrants-$STAMP.tar.gz"
+            echo "ARTIFACT=aether-warrants-$STAMP.tar.gz.gpg" >> "$GITHUB_ENV"
+          else
+            echo "::warning::BACKUP_PASSPHRASE not set — the artifact is UNENCRYPTED."
+            echo "ARTIFACT=aether-warrants-$STAMP.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload artifact
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: aether-warrants-backup
+          path: ${{ env.ARTIFACT }}
+          retention-days: 90
+          if-no-files-found: error
