@@ -86,18 +86,24 @@ run it through `verify_claim` and report the verdict + trust score.
 
 ## Prerequisites / availability
 
-These tools exist only when the **Aether MCP server is connected** to this
-client. The tool ids are:
+These tools exist only when an **Aether MCP registration is connected** to this
+client — and the tool-id PREFIX depends on which registration surface is in use.
+All variants reach the same worker; the tool NAMES are always `verify_claim`,
+`explain_verdict`, `get_warrant`:
 
-- `mcp__aether__verify_claim`
-- `mcp__aether__explain_verdict`
-- `mcp__aether__get_warrant`
+- `mcp__aether__*` — a direct MCP client config entry (e.g. `mcpServers.aether`
+  in Claude Code user scope)
+- `mcp__Aether_Verify__SF2X_Truth_Tribunal___*` — the Desktop Extension (.mcpb)
+- `mcp__<uuid>__*` — a claude.ai custom connector (OAuth; the uuid prefix is
+  account-assigned)
 
-If they are not present in your tool list, the server is not connected. **Tell
-the user to connect/authorize the Aether MCP server in their connector settings
-(or `/mcp` / `claude mcp`).** Do not attempt to authenticate, and do not ask for
-any token or key — auth is handled entirely by the MCP client's connection
-config (see Guardrails).
+**Search your tool list for `verify_claim` rather than assuming one prefix.**
+Several registrations connected at once is deliberate redundancy, not clutter —
+never remove or "clean up" a registration you didn't add. If NO variant is
+present, nothing is connected: **tell the user to connect/authorize the Aether
+MCP server in their connector settings (or `/mcp` / `claude mcp`).** Do not
+attempt to authenticate, and do not ask for any token or key — auth is handled
+entirely by the MCP client's connection config (see Guardrails).
 
 ## The tools
 
