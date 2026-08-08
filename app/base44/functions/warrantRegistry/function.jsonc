@@ -1,4 +1,4 @@
 {
   "name": "warrantRegistry",
-  "entry": "entry.ts"
+  "entry": "base44/functions/warrantRegistry/entry.ts"
 }
