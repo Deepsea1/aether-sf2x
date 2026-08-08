@@ -55,6 +55,34 @@ export default async function(req) {
     if (av.warrant_id) warrant = await svc.entities.Warrant.get(av.warrant_id).catch(() => null);
     if (!warrant) return Response.json({ error: 'No warrant attached to this answer' }, { status: 404 });
 
+    // Linkage gate — closes the gap the Task 8 reviewer found in commit 5553c14. The
+    // ownership check above proves the caller owns `av`; it does NOT prove `warrant` is
+    // the warrant that belongs to `av`. `AnswerVersion.warrant_id` is a plain string field
+    // a signed-in user can set on their OWN AnswerVersion via the normal client SDK
+    // (base44.entities.AnswerVersion.update, as used in app/src/pages/Home.jsx and
+    // app/src/lib/sf2xRevise.js) — RLS permits it because the row is theirs. Warrant ids
+    // are not secret (warrantRegistry, the unauthenticated verifyAnswer endpoint and the
+    // public /verify/:id page all surface them), so without this check an attacker points
+    // their own AnswerVersion's warrant_id at another tenant's Warrant, passes the
+    // ownership gate legitimately, and this endpoint overwrites that Warrant's
+    // validity_status on the drift path below.
+    // The authoritative direction is Warrant.answer_version_id: it is schema-required
+    // (app/base44/entities/Warrant.jsonc) and explicitly set to the owning av's id at
+    // every Warrant.create call site in the repo (shared/attest.js and the inquire,
+    // inquireTribunal x3, verifyResponse, streamVerify, prepareReview,
+    // debateAndValidateCorrection functions, plus the two client paths), each of which
+    // then writes warrant_id back onto that same AnswerVersion — so the two-way link
+    // always agrees for legitimately created records.
+    // Fails closed by construction: a warrant with a missing or empty answer_version_id
+    // is denied by the plain `!==` (undefined !== av.id and '' !== av.id are both true),
+    // so no truthiness pre-guard is needed. Placed before any read of warrant.premises /
+    // warrant.sources and before every mutation. 404 in the same shape as the ownership
+    // gate above. Note it IS distinguishable from the preceding "No warrant attached"
+    // branch, so it confirms a probed Warrant id exists without being linked to the
+    // caller — that is not a leak here, since Warrant existence is already public via
+    // warrantRegistry, verifyAnswer and /verify/:id.
+    if (warrant.answer_version_id !== av.id) return Response.json({ error: 'Not found' }, { status: 404 });
+
     const originalTrust = av.trust_score != null ? av.trust_score : computeTrustworthyRate(av.metrics || {}, warrant);
     const originalValidity = warrant.validity_status;
 
