@@ -1,6 +1,8 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { secrets } from 'base44:runtime';
-import { verifySignature, signatureScheme } from '../../shared/sf2xCore.js';
+// CLI bundling: functions are standalone — signature helpers ride inside the
+// function dir (verbatim copy of sf2xCore.js's signature block; see sf2xVerify.ts).
+import { verifySignature, signatureScheme } from './sf2xVerify.ts';
 
 // Public, read-only Warrant Registry — an append-only transparency log. Anyone
 // can independently verify a warrant's cryptographic signature and inspect the
