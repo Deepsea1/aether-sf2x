@@ -39,10 +39,15 @@ export default async function (req) {
     const root = await sha256hex(ascending.map((w) => w.signed_hash || w.id).join('|'));
 
     let verified = null;
-    // Lookup accepts warrant_id, verification_id, or lineage_id (answer_version_id).
+    // Lookup accepts warrant_id, verification_id, lineage_id (answer_version_id),
+    // or signed_hash (the signature artifact itself — what embeds/badges carry).
     let w = null;
     if (body.warrant_id) {
       w = await svc.entities.Warrant.get(body.warrant_id).catch(() => null);
+    }
+    if (!w && body.signed_hash) {
+      const found = await svc.entities.Warrant.filter({ signed_hash: String(body.signed_hash) }, '-created_date', 1).catch(() => []);
+      w = (found && found[0]) || null;
     }
     if (!w) {
       const lid = body.verification_id || body.lineage_id;
@@ -82,7 +87,24 @@ export default async function (req) {
         signed_hash: stored,
         signature_valid: valid,
         signature_scheme: scheme,
+        // HMAC + fingerprint schemes verify server-side only (the key can't be
+        // published without becoming forgeable) — say so instead of implying more.
+        publicly_verifiable: scheme === 'Ed25519',
         signature_public_key: scheme === 'Ed25519' ? secrets.get('ED25519_PUBLIC_KEY') : null,
+        // Full proof basis: per-claim verification breakdown, verifier-flagged
+        // issues, and the tribunal roles that produced this warrant (lineage).
+        claims: (w.claims || []).map((c) => ({
+          claim: c.claim,
+          supported: c.supported,
+          confidence: c.confidence,
+          note: c.note || '',
+          authoritative_grounding: c.authoritative_grounding ?? null,
+        })),
+        issues: w.issues || [],
+        verifier_lineage: w.roles || [],
+        support_confidence: w.support_confidence ?? null,
+        detectability_confidence: w.detectability_confidence ?? null,
+        falsification: w.falsification || null,
         source_snapshots: w.source_snapshots || [],
         corroboration: w.corroboration || null,
         authoritative_grounding: w.authoritative_grounding || null,

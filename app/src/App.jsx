@@ -74,6 +74,7 @@ const MoatAnalysis = lazy(() => import('@/pages/MoatAnalysis'));
 const Roadmap = lazy(() => import('@/pages/Roadmap'));
 const MonthlyReport = lazy(() => import('@/pages/MonthlyReport'));
 const WarrantVerifier = lazy(() => import('@/pages/WarrantVerifier'));
+const WarrantProof = lazy(() => import('@/pages/WarrantProof'));
 const FastPath = lazy(() => import('@/pages/FastPath'));
 const PitchDeck = lazy(() => import('@/pages/PitchDeck'));
 const DomainBenchmarks = lazy(() => import('@/pages/DomainBenchmarks'));
@@ -191,6 +192,7 @@ const AuthenticatedApp = () => {
       <Route path="/roadmap" element={<Roadmap />} />
       <Route path="/monthly-report" element={<MonthlyReport />} />
       <Route path="/warrant-verifier" element={<WarrantVerifier />} />
+      <Route path="/warrant-proof" element={<WarrantProof />} />
       <Route path="/fast-path" element={<FastPath />} />
       <Route path="/pitch" element={<PitchDeck />} />
       <Route path="/domain-benchmarks" element={<DomainBenchmarks />} />
