@@ -67,6 +67,24 @@
         },
         "handler": "warrantRegistry",
         "annotations": { "read_only_hint": true, "destructive_hint": false, "idempotent_hint": true }
+      },
+      {
+        "name": "search_claims",
+        "title": "Search Published Claims",
+        "description": "Search Aether's PUBLISHED claim registry: individual factual claims that were explicitly published for public view, each with its adjudicated verdict, risk level, policy decision, and an aggregate evidence summary. Scope is strictly the claims carrying an explicit is_public publication flag — customer claims, private tribunal runs, and private-repository PR verifications are never included, and no tenant, author, or source-asset identifiers are returned. Expect an empty result set: publication is opt-in and deliberate, so this registry is empty until claims are explicitly published, and an empty response means nothing has been published rather than that the search failed. Read-only.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "text_query": { "type": "string", "description": "Case-insensitive substring match against the claim text." },
+            "category": { "type": "string", "enum": ["benchmark_claim", "security_claim", "financial_claim", "legal_claim", "medical_claim", "marketing_claim", "technical_claim", "factual_claim", "historical_claim", "general_claim"], "description": "Restrict to one claim category. Narrows within the published set only." },
+            "verdict_status": { "type": "string", "enum": ["pending", "supported", "supported_with_limits", "mixed", "unsupported", "contradicted", "unverifiable", "out_of_scope"], "description": "Restrict to one adjudicated verdict. Narrows within the published set only." },
+            "risk_level": { "type": "string", "enum": ["low", "medium", "high", "critical"], "description": "Restrict to one risk level. Narrows within the published set only." },
+            "limit": { "type": "number", "description": "Max claims to return. 1-100, defaults to 20." }
+          },
+          "required": []
+        },
+        "handler": "searchClaims",
+        "annotations": { "read_only_hint": true, "destructive_hint": false, "idempotent_hint": true }
       }
     ]
   }

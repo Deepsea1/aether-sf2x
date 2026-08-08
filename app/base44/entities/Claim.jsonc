@@ -162,6 +162,31 @@
       "type": "string",
       "description": "Tenant isolation key \u2014 the owning customer/app user."
     },
+    // PUBLICATION FLAG - read this before using any other field to decide what is public.
+    //
+    // is_public is the ONLY field that means "this claim may be shown to strangers". It is an
+    // explicit publication decision and nothing else. It must be set true deliberately, by
+    // application code, at the exact point a claim is intentionally published: never inferred,
+    // never derived, never defaulted on.
+    //
+    // It must NOT be inferred from source_asset_type, category, risk_level, tenant_id, or any
+    // other field that describes where a claim CAME FROM. Origin is not consent. This rule is
+    // written here because inferring it once already caused a live leak: a public search endpoint
+    // scoped itself to source_asset_type == 'pr_diff' on the belief that meant "Aether's own demo
+    // claims". It does not: githubPrVerify is an authenticated per-customer endpoint, so every
+    // paying customer's private-repo PR claims carry that same value, and their verbatim diff
+    // text became unauthenticated, cross-tenant, full-text searchable. That commit was reverted.
+    //
+    // Absent or false means PRIVATE. There is deliberately no schema "default" here: every claim
+    // is private unless something explicitly says otherwise, and no default value should ever be
+    // added that could turn this into an opt-out. Public readers must filter on
+    // { is_public: true } as a hard, non-overridable key (see functions/searchClaims/entry.ts).
+    // As of this schema change nothing in the codebase sets it true, so the public set is empty.
+    // That is the correct, safe initial state, not a bug to work around.
+    "is_public": {
+      "type": "boolean",
+      "description": "Explicit publication decision \u2014 true only when this claim was deliberately published for unauthenticated public view. Absent/false means private. Never infer this from source_asset_type, category, or any other origin field."
+    },
     "description": {
       "type": "string",
       "maxLength": 1000,
