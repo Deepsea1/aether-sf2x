@@ -183,9 +183,39 @@
     // { is_public: true } as a hard, non-overridable key (see functions/searchClaims/entry.ts).
     // As of this schema change nothing in the codebase sets it true, so the public set is empty.
     // That is the correct, safe initial state, not a bug to work around.
+    //
+    // WHY THIS FIELD CARRIES ITS OWN `rls` BLOCK (field-level security), unlike every other
+    // property on every entity in this app:
+    // The entity-level rls.create/rls.update below are ROW-level predicates - they answer "may
+    // this user touch this row at all", not "may this user set this particular field". They admit
+    // any authenticated user for a row they own (created_by_id == user.id). Without the field-level
+    // rule here, that user could simply include `is_public: true` in an ordinary create/update of
+    // their own Claim - alongside arbitrary `text` and forged `verdict_status`/`policy_decision` -
+    // and the row would land in the unauthenticated public registry served by
+    // functions/searchClaims. Row ownership is not publication authority.
+    //
+    // So `write` is restricted to role == admin (Base44 Field Level Security: a per-property `rls`
+    // block supporting `read`/`write`, docs.base44.com/developers/backend/resources/entities/
+    // security). A non-admin's create/update cannot set this field regardless of row ownership.
+    // `read` stays open - an owner may see whether their own claim is published; the flag itself
+    // discloses nothing.
+    //
+    // This does NOT constrain the legitimate product flow: the two paths that create Claims -
+    // functions/githubPrVerify/entry.ts and shared/claimPersistence.js (the tribunal pipeline) -
+    // both write through `base44.asServiceRole` and neither includes `is_public` in its payload.
+    // Any future deliberate publication mechanism must be an admin action or a service-role backend
+    // function; do not relax this to let a claim's own creator publish it.
     "is_public": {
       "type": "boolean",
-      "description": "Explicit publication decision \u2014 true only when this claim was deliberately published for unauthenticated public view. Absent/false means private. Never infer this from source_asset_type, category, or any other origin field."
+      "description": "Explicit publication decision \u2014 true only when this claim was deliberately published for unauthenticated public view. Absent/false means private. Never infer this from source_asset_type, category, or any other origin field. Field-level RLS: writable only by admin (or service-role backend functions), never by the row's own creator.",
+      "rls": {
+        "read": true,
+        "write": {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      }
     },
     "description": {
       "type": "string",
