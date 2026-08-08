@@ -4,6 +4,7 @@ import { ShieldCheck, FileCheck2, Signature, AlertOctagon, Gauge, Server } from 
 import { base44 } from '@/api/base44Client';
 import AppShell from '@/components/sf2x/AppShell';
 import StatCard from '@/components/sf2x/StatCard';
+import LedgerIntegrityCard from '@/components/sf2x/LedgerIntegrityCard';
 import { computeTrustworthyRate, timeUntilExpiry } from '@/lib/sf2x';
 
 const RISK_FRAMEWORK = [
@@ -93,6 +94,9 @@ export default function TrustCenter() {
                 ))}
               </div>
             </div>
+
+            {/* Ledger integrity — provenance chain verification */}
+            <LedgerIntegrityCard />
 
             {/* Evaluation + incident + registry */}
             <div className="grid lg:grid-cols-3 gap-4">
