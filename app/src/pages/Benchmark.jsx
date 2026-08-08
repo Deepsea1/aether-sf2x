@@ -6,7 +6,10 @@ import PublicNav from '@/components/sf2x/PublicNav';
 
 const OG_IMAGE = 'https://media.base44.com/images/public/6a6babb38b48187e5d4799c4/615cf5785_generated_image.png';
 
-// Field baselines (independent reference systems) — the fixed comparison set.
+// NOTE: this page publishes no fixed comparison set. Every number it shows comes
+// from the live BenchResult rows it fetches. Do not reintroduce hardcoded
+// competitor figures — the previous og:description carried "51 RAG+validation /
+// 39 baseline LLM / 14 plain LLM" with no source anywhere in this codebase.
 function pct(v, digits = 0) { return `${(Number(v || 0) * 100).toFixed(digits)}%`; }
 function fmtMttc(s) { const m = Math.round((s || 0) / 60); return m >= 60 ? `${(m / 60).toFixed(1)}h` : `${m}m`; }
 
@@ -14,10 +17,16 @@ function Nav() {
   return <PublicNav />;
 }
 
-function ShareBar() {
+function ShareBar({ score }) {
   const [copied, setCopied] = useState(false);
   const url = typeof window !== 'undefined' ? window.location.href : '';
-  const tweet = `https://twitter.com/intent/tweet?text=${encodeURIComponent('SF2X + red-team scores 91/100 on the AI hallucination benchmark — can your AI be trusted?')}&url=${encodeURIComponent(url)}`;
+  // Share text tracks the live certified score. Until the leaderboard loads (or
+  // if no certified run exists yet) it stays honestly general rather than
+  // shipping a specific number no data backs.
+  const tweetText = score != null
+    ? `SF2X + red-team scores ${score}/100 on the AI hallucination benchmark — can your AI be trusted?`
+    : 'The AI hallucination benchmark — can your AI be trusted? See the live certified leaderboard.';
+  const tweet = `https://twitter.com/intent/tweet?text=${encodeURIComponent(tweetText)}&url=${encodeURIComponent(url)}`;
   function copy() {
     navigator.clipboard?.writeText(url);
     setCopied(true);
@@ -53,23 +62,6 @@ function MetricCard({ icon: Icon, label, value, sub, accent }) {
 export function BenchmarkContent() {
   const [bench, setBench] = useState([]);
 
-  // Social meta tags + title for the benchmark share surface.
-  useEffect(() => {
-    document.title = 'SF2X Benchmark — Can you trust your AI? | Hallucination Leaderboard';
-    const setMeta = (prop, val) => {
-      let el = document.querySelector(`meta[property="${prop}"]`) || document.querySelector(`meta[name="${prop}"]`);
-      if (!el) { el = document.createElement('meta'); el.setAttribute('property', prop); document.head.appendChild(el); }
-      el.setAttribute('content', val);
-    };
-    setMeta('og:title', 'SF2X Benchmark — Can you trust your AI?');
-    setMeta('og:description', 'SF2X + red-team scores 91/100 on the AI hallucination benchmark — vs 51 for RAG+validation, 39 for baseline LLM, 14 for plain LLM. See the live certified leaderboard.');
-    setMeta('og:image', OG_IMAGE);
-    setMeta('og:url', window.location.href);
-    setMeta('twitter:title', 'SF2X Benchmark — Can you trust your AI?');
-    setMeta('twitter:description', 'SF2X + red-team scores 91/100. See the live certified hallucination leaderboard.');
-    setMeta('twitter:image', OG_IMAGE);
-  }, []);
-
   useEffect(() => {
     base44.entities.BenchResult.list('-created_date', 20).then(setBench).catch(() => {});
   }, []);
@@ -77,6 +69,36 @@ export function BenchmarkContent() {
   const certifiedRow = bench.filter((b) => b.certified).sort((a, b) => b.bench_score - a.bench_score)[0];
   const latestRow = bench[0];
   const metricsRow = certifiedRow || latestRow || {};
+  // The one number this page can honestly publish: the best certified run's own
+  // score, straight from the same BenchResult rows the table below renders.
+  const certifiedScore = certifiedRow && certifiedRow.bench_score != null ? Math.round(certifiedRow.bench_score) : null;
+
+  // Social meta tags + title for the benchmark share surface. Depends on
+  // certifiedScore so link previews and the visible leaderboard always agree —
+  // these tags are what scrapers and shared posts carry, so a hardcoded number
+  // here outlives whatever the live data actually says.
+  useEffect(() => {
+    document.title = 'SF2X Benchmark — Can you trust your AI? | Hallucination Leaderboard';
+    const setMeta = (prop, val) => {
+      let el = document.querySelector(`meta[property="${prop}"]`) || document.querySelector(`meta[name="${prop}"]`);
+      if (!el) { el = document.createElement('meta'); el.setAttribute('property', prop); document.head.appendChild(el); }
+      el.setAttribute('content', val);
+    };
+    // No certified run loaded yet => no specific claim. The previous copy also
+    // compared against "51 RAG+validation / 39 baseline / 14 plain LLM"; those
+    // figures had no source anywhere in this codebase, so they are gone rather
+    // than restated. Any comparison set added later must come from real rows.
+    const scoreClaim = certifiedScore != null
+      ? `SF2X + red-team scores ${certifiedScore}/100 on the AI hallucination benchmark. `
+      : '';
+    setMeta('og:title', 'SF2X Benchmark — Can you trust your AI?');
+    setMeta('og:description', `${scoreClaim}See the live certified hallucination leaderboard.`);
+    setMeta('og:image', OG_IMAGE);
+    setMeta('og:url', window.location.href);
+    setMeta('twitter:title', 'SF2X Benchmark — Can you trust your AI?');
+    setMeta('twitter:description', `${scoreClaim}See the live certified hallucination leaderboard.`);
+    setMeta('twitter:image', OG_IMAGE);
+  }, [certifiedScore]);
 
   return (
     <main className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 pt-10 space-y-8">
@@ -86,15 +108,15 @@ export function BenchmarkContent() {
           <div className="flex items-center gap-2 mb-2">
             <span className="text-[10px] uppercase tracking-[0.16em] text-emerald-400/80">Public Benchmark</span>
             <span className="text-[10px] text-slate-600">· Aug 2026</span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-400/10 text-emerald-300 ring-1 ring-emerald-400/30 flex items-center gap-1"><ShieldCheck className="h-3 w-3" /> Certified</span>
+            {certifiedRow && <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-400/10 text-emerald-300 ring-1 ring-emerald-400/30 flex items-center gap-1"><ShieldCheck className="h-3 w-3" /> Certified</span>}
           </div>
           <h1 className="font-heading text-2xl sm:text-4xl font-semibold text-white tracking-tight leading-tight">
             Can you trust your AI? The hallucination benchmark.
           </h1>
           <p className="text-sm sm:text-base text-slate-400 mt-3 max-w-2xl leading-relaxed">
-            SF2X scores every AI system on whether its answers are warranted, supported, and resistant to adversarial attack. The full red-team loop lifts the score from 58 → 91 — the difference between a demo and trust infrastructure.
+            SF2X scores every AI system on whether its answers are warranted, supported, and resistant to adversarial attack. The full red-team loop is what separates a demo from trust infrastructure{certifiedScore != null ? ` — the best certified run scores ${certifiedScore}/100` : ''}.
           </p>
-          <div className="mt-5"><ShareBar /></div>
+          <div className="mt-5"><ShareBar score={certifiedScore} /></div>
         </div>
 
         {/* Key metrics — SF2X certified run */}
