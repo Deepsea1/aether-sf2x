@@ -28,6 +28,9 @@ export const PLAN_QUOTAS = {
 // check) so every plan gets unlimited gate calls; only warrant + inquire meter.
 export const CREDIT_COSTS = {
   warrantApi: 5,
+  // Per ITEM in the batch — batchWarrant runs the identical attestAnswer work as
+  // warrantApi, up to 25x per call, so it bills at the same unit price.
+  batchWarrant: 5,
   gateApi: 0,
   inquire: 10,
   verifyResponse: 2,
