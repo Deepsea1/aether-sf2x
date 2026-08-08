@@ -67,6 +67,24 @@
         },
         "handler": "warrantRegistry",
         "annotations": { "read_only_hint": true, "destructive_hint": false, "idempotent_hint": true }
+      },
+      {
+        "name": "search_claims",
+        "title": "Search Verified Claims",
+        "description": "Search Aether's public claim-verification registry: individual factual claims extracted from verified GitHub pull requests, each with an adjudicated verdict, risk level, policy decision, and a summary of the evidence behind it. Use to check whether a specific claim has already been adjudicated, to survey how claims in a category or risk band were decided, or to cite prior verification history. Returns public PR-verification claims only — private tribunal claims are not searchable and no tenant or author identifiers are returned. Read-only.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "text_query": { "type": "string", "description": "Case-insensitive substring match against the claim text." },
+            "category": { "type": "string", "enum": ["benchmark_claim", "security_claim", "financial_claim", "legal_claim", "medical_claim", "marketing_claim", "technical_claim", "factual_claim", "historical_claim", "general_claim"], "description": "Restrict to one claim category." },
+            "verdict_status": { "type": "string", "enum": ["pending", "supported", "supported_with_limits", "mixed", "unsupported", "contradicted", "unverifiable", "out_of_scope"], "description": "Restrict to one adjudicated verdict." },
+            "risk_level": { "type": "string", "enum": ["low", "medium", "high", "critical"], "description": "Restrict to one risk level." },
+            "limit": { "type": "number", "description": "Max claims to return. 1-100, defaults to 20." }
+          },
+          "required": []
+        },
+        "handler": "searchClaims",
+        "annotations": { "read_only_hint": true, "destructive_hint": false, "idempotent_hint": true }
       }
     ]
   }
