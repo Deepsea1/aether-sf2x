@@ -314,6 +314,8 @@ export default async function(req) {
         flash_signals: c.flash_signals,
         policy_decision: c.policy_decision,
         policy_rule: c.policy_rule,
+        file_path: c.file_path,
+        diff_line: c.diff_line,
       })),
       flash_summary: flashResults.summary,
       policy: {
