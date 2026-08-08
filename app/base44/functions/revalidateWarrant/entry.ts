@@ -24,12 +24,36 @@ export default async function(req) {
     try { av = await svc.entities.AnswerVersion.get(id); }
     catch { return Response.json({ error: 'Not found' }, { status: 404 }); }
 
+    // Guarded (was an unguarded get before this fix): this fetch now feeds an authorization
+    // decision, so it must never be issued with a falsy id, matching gateApi's form.
+    let inquiry = null;
+    if (av.inquiry_id) { try { inquiry = await svc.entities.Inquiry.get(av.inquiry_id); } catch {} }
+
+    // Cross-tenant ownership gate. `resolveApiKey` only proves the caller holds SOME
+    // valid key — the lineage id below is client-supplied and `svc` bypasses RLS, so
+    // without this check any key holder could force a re-validation pass that
+    // OVERWRITES another tenant's Warrant.validity_status and AnswerVersion.trust_score
+    // (the `drifted` branch further down). Unlike the sibling read-only gateApi fix
+    // (commit 2c38a88, which gated only its side-effects), a write endpoint has no safe
+    // "defer" option, so the whole endpoint fails closed here — before the warrant fetch,
+    // before any read of warrant.premises/warrant.sources, and before any mutation.
+    // Ownership is checked against BOTH fields because neither alone is sufficient:
+    // `created_by_id` is stamped only on session-created records (console UI, MCP
+    // run_tribunal), while API-key/service-role paths (warrantApi, batchWarrant, inquire)
+    // denormalise the owner onto the parent Inquiry.customer_id instead. See
+    // .superpowers/sdd/aether-remaining-build-plan/task-6-report.md for the evidence trail.
+    // Fail-closed: a missing/empty owner field never counts as a match, so lineages with
+    // neither field set (anonymous verifyResponse/streamVerify) now 404 by design.
+    // 404, not 403, and identical in shape to the missing-id branch above — no
+    // "exists but isn't yours" enumeration oracle.
+    const uid = auth.apiKey.user_id;
+    const owns = (!!av.created_by_id && av.created_by_id === uid)
+              || (!!inquiry?.customer_id && inquiry.customer_id === uid);
+    if (!uid || !owns) return Response.json({ error: 'Not found' }, { status: 404 });
+
     let warrant = null;
     if (av.warrant_id) warrant = await svc.entities.Warrant.get(av.warrant_id).catch(() => null);
     if (!warrant) return Response.json({ error: 'No warrant attached to this answer' }, { status: 404 });
-
-    let inquiry = null;
-    try { inquiry = await svc.entities.Inquiry.get(av.inquiry_id); } catch {}
 
     const originalTrust = av.trust_score != null ? av.trust_score : computeTrustworthyRate(av.metrics || {}, warrant);
     const originalValidity = warrant.validity_status;
