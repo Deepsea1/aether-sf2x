@@ -55,20 +55,38 @@ export default async function(req) {
     }
 
     await recordUsage(svc, auth.apiKey, 'gateApi', CREDIT_COSTS.gateApi, { lineage_id: av.id });
-    if (decision === 'suppress' || decision === 'escalate') {
-      await fireWebhooks(svc, decision === 'suppress' ? 'gate.suppress' : 'gate.escalate', {
-        decision, gate_level: level, trust_score: trust, reason,
-        answer_version_id: av.id, url: `/verify/${av.id}`,
-        summary: `${decision.toUpperCase()} · ${reason}`,
-      }, auth.apiKey.user_id).catch(() => {});
+
+    // Cross-tenant side-effect gate (partial fix — scoped deliberately).
+    // The read path is intentionally left open: everything returned below is already
+    // a subset of what the unauthenticated verifyAnswer endpoint exposes (/verify/:id).
+    // Only the webhook + UserEvent writes are gated, so a caller querying a lineage they
+    // do not own can no longer pollute their OWN webhook endpoint and analytics history
+    // with another tenant's trust score and decision, attributed as their own event.
+    // Fail-closed: a missing owner field never counts as a match.
+    // A full read-side ownership fix first needs AnswerVersion ownership semantics for
+    // svc-created records confirmed (see .superpowers/sdd/aether-remaining-build-plan/
+    // task-6-report.md) — deferred: that is a data-model decision, not a guess.
+    const inquiry = av.inquiry_id ? await svc.entities.Inquiry.get(av.inquiry_id).catch(() => null) : null;
+    const uid = auth.apiKey.user_id;
+    const owns = (!!av.created_by_id && av.created_by_id === uid)
+              || (!!inquiry?.customer_id && inquiry.customer_id === uid);
+
+    if (owns) {
+      if (decision === 'suppress' || decision === 'escalate') {
+        await fireWebhooks(svc, decision === 'suppress' ? 'gate.suppress' : 'gate.escalate', {
+          decision, gate_level: level, trust_score: trust, reason,
+          answer_version_id: av.id, url: `/verify/${av.id}`,
+          summary: `${decision.toUpperCase()} · ${reason}`,
+        }, auth.apiKey.user_id).catch(() => {});
+      }
+      await recordUserEvent(svc, {
+        user_id: auth.apiKey.user_id, event_type: 'gate',
+        trust_score: trust, verdict: decision,
+        stakes, source: 'api',
+        linked_entity_type: 'AnswerVersion', linked_entity_id: av.id,
+        metadata: { gate_level: level, certified, warrant_status: warrant ? warrant.validity_status : 'unknown' },
+      });
     }
-    await recordUserEvent(svc, {
-      user_id: auth.apiKey.user_id, event_type: 'gate',
-      trust_score: trust, verdict: decision,
-      stakes, source: 'api',
-      linked_entity_type: 'AnswerVersion', linked_entity_id: av.id,
-      metadata: { gate_level: level, certified, warrant_status: warrant ? warrant.validity_status : 'unknown' },
-    });
     return Response.json({
       decision,
       gate_level: level,
