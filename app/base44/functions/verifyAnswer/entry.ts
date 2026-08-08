@@ -3,6 +3,16 @@ import { secrets } from 'base44:runtime';
 import { verifySignature, signatureScheme, computeTrustworthyRate } from '../../shared/sf2xCore.js';
 import { isCertifiedRun } from '../../shared/redTeam.js';
 
+// PUBLIC AND UNAUTHENTICATED BY DESIGN — this is not a missing auth check.
+// It backs the public proof surface (/verify/:id, Registry, WarrantProof, Badge,
+// EmbedBadge): anyone holding a lineage id can independently confirm the warrant and
+// its signature. Independently verifiable warrants are the product.
+// It serves a curated field subset for ONE already-known id and cannot enumerate —
+// which is why it is safe while AnswerVersion's restrictive RLS stays in place.
+// Before adding an ownership gate here, read the RLS SCOPE note in
+// entities/AnswerVersion.jsonc: AnswerVersions created via the service-role API paths
+// do not carry the API caller in created_by_id, so such a gate would 404 real customers.
+
 export default async function (req) {
   try {
     const base44 = createClientFromRequest(req);
