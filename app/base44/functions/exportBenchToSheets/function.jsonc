@@ -1,0 +1,4 @@
+{
+  "name": "exportBenchToSheets",
+  "entry": "entry.ts"
+}

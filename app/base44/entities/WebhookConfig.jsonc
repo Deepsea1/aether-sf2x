@@ -1,0 +1,92 @@
+{
+  "name": "WebhookConfig",
+  "type": "object",
+  "properties": {
+    "label": {
+      "type": "string",
+      "description": "Friendly name for this webhook destination."
+    },
+    "url": {
+      "type": "string",
+      "description": "Webhook endpoint URL (Slack incoming webhook, PagerDuty events API, or custom)."
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Events that fire this webhook: gate.suppress, gate.escalate, drift.alert, review.opened, verify.rejected. Empty = all events."
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "slack",
+        "pagerduty",
+        "custom"
+      ],
+      "default": "custom",
+      "description": "Delivery format: slack (Slack incoming webhook), pagerduty (Events API v2), custom (raw JSON)."
+    },
+    "secret": {
+      "type": "string",
+      "description": "Optional shared secret sent in the X-Aether-Signature header for custom endpoints."
+    }
+  },
+  "required": [
+    "url"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

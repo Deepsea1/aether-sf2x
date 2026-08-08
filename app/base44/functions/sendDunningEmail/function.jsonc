@@ -1,0 +1,4 @@
+{
+  "name": "sendDunningEmail",
+  "entry": "entry.ts"
+}

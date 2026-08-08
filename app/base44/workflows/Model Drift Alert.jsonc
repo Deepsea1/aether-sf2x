@@ -1,0 +1,45 @@
+{
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 10 * * *",
+      "one_time_date": null,
+      "timezone": "America/Los_Angeles",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "name": "Model Drift Alert",
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "model_drift_alert",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "check_drift": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "driftAlert",
+            "args": {}
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Compute drift & alert admins",
+            "description": "Emails summary if outside safety threshold"
+          }
+        }
+      }
+    ]
+  },
+  "description": "Runs daily to compute aggregate model accuracy from recent bench runs and email admins a summary whenever accuracy drifts outside the established safety threshold."
+}

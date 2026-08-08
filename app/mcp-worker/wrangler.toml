@@ -1,0 +1,23 @@
+name = "aether-mcp"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# Aether warrantApi endpoint URL (Base44 backend function).
+# Find this in your Base44 dashboard under the warrantApi function, or use your
+# app's published URL. Set the real value via the dashboard or here:
+[vars]
+AETHER_WARRANT_API_URL = "https://YOUR-APP.base44.app/api/functions/warrantApi"
+# Warrant registry — the durable source of truth get_warrant / explain_verdict
+# fall back to when a verification_id isn't in the local KV cache.
+AETHER_WARRANT_REGISTRY_URL = "https://YOUR-APP.base44.app/api/functions/warrantRegistry"
+
+# KV namespace for caching verdicts (durable warrant lookup).
+# Create it first: npx wrangler kv namespace create WARRANTS
+# then paste the id below.
+[[kv_namespaces]]
+binding = "WARRANTS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Secrets — do NOT put these in this file. Set them via the dashboard or CLI:
+#   npx wrangler secret put AETHER_API_KEY        (your SF2X_API_KEY value)
+#   npx wrangler secret put AETHER_MCP_TOKEN      (a long random string clients use to authenticate)

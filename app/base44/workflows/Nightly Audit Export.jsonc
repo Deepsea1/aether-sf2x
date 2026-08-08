@@ -1,0 +1,45 @@
+{
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 2 * * *",
+      "one_time_date": null,
+      "timezone": "America/Los_Angeles",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "description": "Exports governance audit decisions and correction events to Google Sheets every night at 2am.",
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "nightly_audit_export",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "export": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "exportAuditToSheets",
+            "args": {}
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Export audit to Sheets",
+            "description": "Governance decisions + corrections"
+          }
+        }
+      }
+    ]
+  },
+  "name": "Nightly Audit Export"
+}

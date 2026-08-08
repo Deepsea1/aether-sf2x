@@ -1,0 +1,87 @@
+{
+  "name": "AISystem",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Name of the governed AI system / deployment."
+    },
+    "owner": {
+      "type": "string",
+      "description": "Named owner accountable for the system."
+    },
+    "purpose": {
+      "type": "string",
+      "description": "Documented purpose and intended use."
+    },
+    "domain": {
+      "type": "string",
+      "description": "Knowledge or operational domain."
+    },
+    "risk_tier": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "regulated"
+      ],
+      "default": "medium"
+    },
+    "lifecycle_state": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "evaluated",
+        "approved",
+        "monitored",
+        "degraded",
+        "suspended",
+        "retired"
+      ],
+      "default": "draft"
+    },
+    "evaluation_summary": {
+      "type": "string",
+      "description": "Summary of the latest evaluation."
+    },
+    "release_gates": {
+      "type": "object",
+      "description": "Release gate checklist (booleans): named_owner, documented_purpose, evaluation_summary, review_completion, risk_signoff, rollback_criteria."
+    },
+    "monitoring": {
+      "type": "object",
+      "description": "Monitoring snapshot: performance_drift, trust_drift, policy_violations, review_backlog, evidence_freshness, correction_speed."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Optional free-text description."
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

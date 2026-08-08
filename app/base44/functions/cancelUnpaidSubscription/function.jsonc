@@ -1,0 +1,4 @@
+{
+  "name": "cancelUnpaidSubscription",
+  "entry": "entry.ts"
+}

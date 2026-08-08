@@ -1,0 +1,4 @@
+{
+  "name": "sendUpgradeEmail",
+  "entry": "entry.ts"
+}

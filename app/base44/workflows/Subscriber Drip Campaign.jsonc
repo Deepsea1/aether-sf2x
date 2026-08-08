@@ -1,0 +1,93 @@
+{
+  "name": "Subscriber Drip Campaign",
+  "description": "On a new NewsletterSubscriber: send a welcome email immediately, an insights digest (built via the VerificationHistory assistant's approach) after 3 days, and a discount offer after 7 days if they haven't started a subscription.",
+  "trigger": {
+    "config": {
+      "trigger_type": "entity",
+      "entity_name": "NewsletterSubscriber",
+      "events": [
+        "create"
+      ]
+    },
+    "condition": "${ .trigger.data.status == \"subscribed\" }"
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "subscriber_drip_campaign",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "welcome": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "sendSubscriberWelcome",
+            "args": {
+              "email": "${ .trigger.data.email }"
+            }
+          },
+          "then": "wait_for_digest",
+          "x-base44": {
+            "title": "Send welcome email",
+            "description": "Immediate welcome to the new subscriber"
+          }
+        }
+      },
+      {
+        "wait_for_digest": {
+          "wait": "P3D",
+          "then": "digest",
+          "x-base44": {
+            "title": "Wait 3 days",
+            "description": "Hold before the insights digest"
+          }
+        }
+      },
+      {
+        "digest": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "sendInsightsDigest",
+            "args": {
+              "email": "${ .trigger.data.email }"
+            }
+          },
+          "then": "wait_for_offer",
+          "x-base44": {
+            "title": "Send insights digest",
+            "description": "Recent platform insights summary"
+          }
+        }
+      },
+      {
+        "wait_for_offer": {
+          "wait": "P4D",
+          "then": "offer",
+          "x-base44": {
+            "title": "Wait 4 more days",
+            "description": "Hold before the discount offer (day 7)"
+          }
+        }
+      },
+      {
+        "offer": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "sendDiscountOffer",
+            "args": {
+              "email": "${ .trigger.data.email }",
+              "subscriber_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Send discount offer",
+            "description": "Offer if not yet subscribed"
+          }
+        }
+      }
+    ]
+  }
+}

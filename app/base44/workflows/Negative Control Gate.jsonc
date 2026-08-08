@@ -1,0 +1,39 @@
+{
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "negative_control_gate",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "run_gate": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runNegativeControls",
+            "args": {
+              "run_type": "scheduled"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Run negative controls",
+            "description": "Adversarial fabrication catch-rate gate"
+          }
+        }
+      }
+    ]
+  },
+  "name": "Negative Control Gate",
+  "description": "Runs the adversarial negative-control eval on every publish so a regression that lets fabrications pass is caught before it ships. Stores a CorrelationAudit (dataset 'negative-controls-adversarial') with the catch-rate.",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "app_publish",
+      "events": [
+        "published"
+      ]
+    }
+  }
+}

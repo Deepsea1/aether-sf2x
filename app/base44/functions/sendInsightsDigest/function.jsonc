@@ -1,0 +1,4 @@
+{
+  "name": "sendInsightsDigest",
+  "entry": "entry.ts"
+}

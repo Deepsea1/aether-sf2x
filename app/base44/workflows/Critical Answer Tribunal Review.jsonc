@@ -1,0 +1,50 @@
+{
+  "name": "Critical Answer Tribunal Review",
+  "description": "When a warranted answer is critical-stakes or its trust score drops below 75, convene the tribunal, store a validated answer summary on the inquiry, route the answer to the review queue, and email admins with an approve / re-run / verify / kill-switch recommendation.",
+  "trigger": {
+    "config": {
+      "trigger_type": "entity",
+      "entity_name": "AnswerVersion",
+      "events": [
+        "create"
+      ]
+    },
+    "condition": "${ (.trigger.data.stakes_level == \"critical\") or ((.trigger.data.trust_score // 100) < 75) }"
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "critical_answer_tribunal_review",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "settle": {
+          "wait": "PT15S",
+          "then": "run_tribunal",
+          "x-base44": {
+            "title": "Let the warrant settle",
+            "description": "Ensure the warrant is linked to the answer version"
+          }
+        }
+      },
+      {
+        "run_tribunal": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "escalateToTribunal",
+            "args": {
+              "answer_version_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Run tribunal + route to review",
+            "description": "Debate, store validated summary, email admins"
+          }
+        }
+      }
+    ]
+  }
+}

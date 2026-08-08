@@ -1,0 +1,100 @@
+{
+  "name": "RedTeamRun",
+  "type": "object",
+  "properties": {
+    "target_id": {
+      "type": "string",
+      "description": "The answer version under attack."
+    },
+    "inquiry_id": {
+      "type": "string"
+    },
+    "attack_vector": {
+      "type": "string",
+      "enum": [
+        "prompt_injection",
+        "authority_fabrication",
+        "premise_inversion",
+        "scope_creep",
+        "temporal_drift",
+        "evasion"
+      ],
+      "default": "prompt_injection"
+    },
+    "attack_prompt": {
+      "type": "string"
+    },
+    "response_text": {
+      "type": "string",
+      "description": "How the system responded to the attack."
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "resisted",
+        "wobbled",
+        "broken"
+      ],
+      "default": "resisted"
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "none",
+        "low",
+        "moderate",
+        "high",
+        "critical"
+      ],
+      "default": "none"
+    },
+    "trust_after": {
+      "type": "number"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "target_id"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "read": null,
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

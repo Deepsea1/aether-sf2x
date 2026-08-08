@@ -1,0 +1,92 @@
+{
+  "name": "UserMetrics",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "description": "App user these rollup metrics belong to."
+    },
+    "total_inquiries": {
+      "type": "number",
+      "default": 0,
+      "description": "Lifetime inquiry count."
+    },
+    "total_verifications": {
+      "type": "number",
+      "default": 0,
+      "description": "Lifetime verify + attest count."
+    },
+    "total_gates": {
+      "type": "number",
+      "default": 0
+    },
+    "total_reviews": {
+      "type": "number",
+      "default": 0
+    },
+    "mean_trust": {
+      "type": "number",
+      "description": "Mean trust score across the user's events, 0-100."
+    },
+    "contested_rate": {
+      "type": "number",
+      "description": "Fraction of events with a contested/rejected/suppressed verdict, 0-1."
+    },
+    "rejected_count": {
+      "type": "number",
+      "default": 0
+    },
+    "api_credits_used": {
+      "type": "number",
+      "default": 0
+    },
+    "api_credits_this_month": {
+      "type": "number",
+      "default": 0
+    },
+    "last_active_date": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "domain_counts": {
+      "type": "object",
+      "description": "{domain: count} distribution of the user's events."
+    },
+    "event_counts": {
+      "type": "object",
+      "description": "{event_type: count} breakdown."
+    }
+  },
+  "required": [
+    "user_id"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

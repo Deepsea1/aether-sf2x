@@ -1,0 +1,135 @@
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { resolveApiKey } from '../../shared/apiAuth.js';
+import { runVerification, snapshotSources } from '../../shared/attest.js';
+import { computeTrustworthyRate } from '../../shared/sf2xCore.js';
+import { emitTelemetry, newTraceId } from '../../shared/telemetry.js';
+
+// Re-validate a previously attested answer against the live web. Trust is not
+// static: sources rot, facts change. This re-runs the verification pass, measures
+// drift from the original attestation, logs a CorrectionEvent when the answer has
+// degraded, and downgrades the warrant validity / trust score in place.
+
+export default async function(req) {
+  try {
+    const base44 = createClientFromRequest(req);
+    const svc = base44.asServiceRole;
+    const auth = await resolveApiKey(svc, req);
+    if (!auth.ok) return auth.response;
+
+    const body = await req.json().catch(() => ({}));
+    const id = String(body.answer_version_id || body.lineage_id || '').trim();
+    if (!id) return Response.json({ error: 'answer_version_id is required' }, { status: 400 });
+
+    let av;
+    try { av = await svc.entities.AnswerVersion.get(id); }
+    catch { return Response.json({ error: 'Not found' }, { status: 404 }); }
+
+    let warrant = null;
+    if (av.warrant_id) warrant = await svc.entities.Warrant.get(av.warrant_id).catch(() => null);
+    if (!warrant) return Response.json({ error: 'No warrant attached to this answer' }, { status: 404 });
+
+    let inquiry = null;
+    try { inquiry = await svc.entities.Inquiry.get(av.inquiry_id); } catch {}
+
+    const originalTrust = av.trust_score != null ? av.trust_score : computeTrustworthyRate(av.metrics || {}, warrant);
+    const originalValidity = warrant.validity_status;
+
+    const ver = await runVerification(svc, {
+      answerText: av.answer_text,
+      premises: warrant.premises,
+      sources: warrant.sources,
+      domain: (inquiry && inquiry.domain) || 'general',
+    });
+
+    const now = Date.now();
+    const expired = warrant.expiry_date && new Date(warrant.expiry_date).getTime() < now;
+    let newValidity = ver.validity;
+    if (expired) newValidity = 'expired';
+
+    // hole-7 fix: source-rot detection. The warrant stored SHA-256 content
+    // hashes of every cited source at attestation time. Re-fetch now and
+    // compare — catches silent source rewrites the claim-verifier can miss.
+    let sourceRot = { changed: 0, total: 0, sources: [] };
+    try {
+      const priorSnaps = Array.isArray(warrant.source_snapshots) ? warrant.source_snapshots : [];
+      if (priorSnaps.length && Array.isArray(warrant.sources) && warrant.sources.length) {
+        const fresh = await snapshotSources(warrant.sources);
+        sourceRot.total = fresh.length;
+        sourceRot.sources = fresh.map((f) => {
+          const prev = priorSnaps.find((p) => p.url === f.url);
+          const changed = !!(prev && prev.content_hash && f.content_hash && prev.content_hash !== f.content_hash);
+          if (changed) sourceRot.changed++;
+          return { url: f.url, changed, status: f.status };
+        });
+      }
+    } catch { /* best-effort */ }
+
+    const trustDelta = ver.trust - originalTrust;
+    const downgraded = ['valid', 'weak', 'expired'].indexOf(newValidity) > ['valid', 'weak', 'expired'].indexOf(originalValidity)
+      || (originalValidity === 'valid' && newValidity !== 'valid');
+    const driftScore = Math.min(1, Math.abs(trustDelta) / 100 + (downgraded ? 0.3 : 0) + (expired ? 0.2 : 0) + (sourceRot.changed > 0 ? 0.25 : 0));
+    const drifted = driftScore >= 0.1 || downgraded || expired || sourceRot.changed > 0;
+
+    let severity = 'minor';
+    if (driftScore >= 0.5 || newValidity === 'invalid') severity = 'critical';
+    else if (driftScore >= 0.3) severity = 'major';
+    else if (driftScore >= 0.15) severity = 'moderate';
+
+    if (drifted) {
+      await svc.entities.CorrectionEvent.create({
+        inquiry_id: av.inquiry_id,
+        from_version_id: av.id,
+        to_version_id: av.id,
+        from_version: av.version,
+        to_version: av.version,
+        severity,
+        detected_by: 'drift_detector',
+        trust_delta: trustDelta,
+        drift_score: driftScore,
+        notes: `Re-validation: ${ver.supported}/${ver.total} claims now supported (was ${(originalTrust / 100 * (ver.total || 1)).toFixed(0)}/${ver.total}). ${expired ? 'Warrant expired. ' : ''}${ver.issues.slice(0, 3).join('; ')}`,
+      }).catch(() => {});
+
+      await svc.entities.Warrant.update(warrant.id, { validity_status: newValidity }).catch(() => {});
+      await svc.entities.AnswerVersion.update(av.id, { trust_score: ver.trust }).catch(() => {});
+
+      await svc.entities.AuditLog.create({
+        event_type: 'drift_alert',
+        entity_type: 'AnswerVersion',
+        entity_id: av.id,
+        actor_id: auth.apiKey.user_id,
+        summary: `Drift detected · ${originalValidity}→${newValidity} · trust ${originalTrust}→${ver.trust} · drift ${driftScore.toFixed(2)}`,
+        metadata: { via: 'revalidateWarrant', original_trust: originalTrust, new_trust: ver.trust, drift_score: driftScore, severity },
+      }).catch(() => {});
+
+      await emitTelemetry(svc, {
+        trace_id: newTraceId(), event_type: 'drift_detected', span_type: 'operation', group: 'drift', severity: 'warn',
+        linked_entity_type: 'AnswerVersion', linked_entity_id: av.id,
+        drift: { original_trust: originalTrust, new_trust: ver.trust, drift_score: driftScore, validity_before: originalValidity, validity_after: newValidity },
+        summary: `Drift detected · ${originalValidity}→${newValidity}`,
+      }).catch(() => {});
+    }
+
+    return Response.json({
+      answer_version_id: av.id,
+      warrant_id: warrant.id,
+      revalidated: true,
+      drifted,
+      expired,
+      original_trust: originalTrust,
+      new_trust: ver.trust,
+      trust_delta: trustDelta,
+      drift_score: Number(driftScore.toFixed(3)),
+      validity_before: originalValidity,
+      validity_after: newValidity,
+      severity,
+      source_rot_detected: sourceRot.changed > 0,
+      source_rot: sourceRot,
+      claims: ver.claims,
+      issues: ver.issues,
+      support_ratio: ver.supportRatio,
+    });
+  } catch (error) {
+    console.error('revalidateWarrant error', error);
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+}

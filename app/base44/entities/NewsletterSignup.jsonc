@@ -1,0 +1,35 @@
+{
+  "name": "NewsletterSignup",
+  "type": "object",
+  "properties": {
+    "email": {
+      "type": "string",
+      "description": "Subscriber email for the Weekly AI Hallucination Report."
+    },
+    "source": {
+      "type": "string",
+      "description": "Where the signup came from: landing, footer, etc."
+    }
+  },
+  "required": [
+    "email"
+  ],
+  "rls": {
+    "create": null,
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

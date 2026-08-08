@@ -1,0 +1,91 @@
+{
+  "name": "Debate",
+  "type": "object",
+  "properties": {
+    "inquiry_id": {
+      "type": "string",
+      "description": "Parent inquiry being debated."
+    },
+    "answer_version_id": {
+      "type": "string",
+      "description": "The proposer answer version this debate scrutinizes."
+    },
+    "proposer": {
+      "type": "object",
+      "description": "Proposer agent stance + reasoning."
+    },
+    "critic": {
+      "type": "object",
+      "description": "Critic agent objections + risks."
+    },
+    "verifier": {
+      "type": "object",
+      "description": "Verifier agent adjudication + verdict."
+    },
+    "consensus": {
+      "type": "string",
+      "enum": [
+        "agreed",
+        "contested",
+        "rejected"
+      ],
+      "default": "contested"
+    },
+    "verdict_confidence": {
+      "type": "number",
+      "description": "Verifier confidence 0-1."
+    },
+    "minority_report": {
+      "type": "string",
+      "description": "Dissenting view preserved for the record."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Optional free-text description."
+    }
+  },
+  "required": [
+    "inquiry_id",
+    "answer_version_id"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "read": null,
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

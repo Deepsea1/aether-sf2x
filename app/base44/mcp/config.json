@@ -1,0 +1,73 @@
+{
+  "auth": "oauth",
+  "tools": {
+    "functions": [
+      {
+        "name": "run_tribunal",
+        "title": "Run Truth Tribunal",
+        "description": "Run Aether's 3-way proposer/critic/verifier tribunal on a question to produce a warranted, hallucination-checked answer. Use when the user needs a trustworthy, independently-verified answer to a factual question. Returns the hardened answer, a calibrated trust score (0-100), a cryptographically signed warrant, and certification status. Creates an Inquiry, AnswerVersion, and Warrant record owned by the signed-in user.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "prompt": { "type": "string", "description": "The question to answer and verify." },
+            "domain": { "type": "string", "enum": ["General", "Medicine", "Finance", "Legal", "HR", "Engineering", "Science"], "description": "Knowledge domain. Defaults to General." },
+            "stakes": { "type": "string", "enum": ["low", "medium", "high", "critical"], "description": "Decision stakes. low=fast single-model answer; medium=2-model tribunal; high/critical=full 3-way tribunal with cross-firm verification. Defaults to medium." },
+            "model": { "type": "string", "description": "Optional model id for the low-stakes single-model path only (e.g. automatic, gemini_3_flash, claude_sonnet_4_6). Ignored for medium and above." }
+          },
+          "required": ["prompt"]
+        },
+        "handler": "inquireTribunal",
+        "annotations": { "read_only_hint": false, "destructive_hint": false, "idempotent_hint": false }
+      },
+      {
+        "name": "verify_answer",
+        "title": "Verify an AI Answer",
+        "description": "Independently attest an AI-generated answer for hallucinations. Decomposes the text into atomic claims, grounds them against the web, runs the tribunal, signs a cryptographic warrant, and returns a calibrated trust score (0-100), verdict (verified/contested/rejected), warrant id, and red-team certification. Use when the user already has AI-generated text and wants it checked, rather than asking a fresh question.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "answer_text": { "type": "string", "description": "The AI-generated answer text to verify." },
+            "domain": { "type": "string", "enum": ["General", "Medicine", "Finance", "Legal", "HR", "Engineering", "Science"], "description": "Knowledge domain. Defaults to General." },
+            "stakes": { "type": "string", "enum": ["low", "medium", "high", "critical"], "description": "Decision stakes — drives warrant expiry and verification depth. Defaults to medium." },
+            "premises": { "type": "array", "items": { "type": "string" }, "description": "Explicit premises the answer depends on, if known." },
+            "sources": { "type": "array", "items": { "type": "string" }, "description": "Supporting or contradicting source URLs (http/https only) to ground the verification." },
+            "model_label": { "type": "string", "description": "Optional label for the model that produced the answer (for metering/audit)." }
+          },
+          "required": ["answer_text"]
+        },
+        "handler": "warrantApi",
+        "annotations": { "read_only_hint": false, "destructive_hint": false, "idempotent_hint": false }
+      },
+      {
+        "name": "check_gate",
+        "title": "Check Release Gate",
+        "description": "Run the callable suppression gate on a previously-verified answer (by its answer_version_id / lineage_id). Returns an allow / escalate / suppress decision plus the trust score, warrant status, certification, and reason — so low-trust or fabricated answers can be blocked before reaching end users. Read-only: it does not modify the answer.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "answer_version_id": { "type": "string", "description": "The AnswerVersion id (also accepted as lineage_id) returned by a prior verify_answer or run_tribunal call." }
+          },
+          "required": ["answer_version_id"]
+        },
+        "handler": "gateApi",
+        "annotations": { "read_only_hint": true, "destructive_hint": false, "idempotent_hint": true }
+      },
+      {
+        "name": "lookup_warrant",
+        "title": "Look Up Signed Warrant",
+        "description": "Retrieve a cryptographically signed warrant by its id (or by verification_id / lineage_id), or list the append-only warrant transparency chain. Use to verify the signature, trust score, premises, cited sources, and expiry of a previously-issued verification. Pass a warrant_id or verification_id to fetch one warrant; omit all ids to list recent warrants.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "warrant_id": { "type": "string", "description": "The warrant id to fetch." },
+            "verification_id": { "type": "string", "description": "Alternative lookup key: the answer_version_id / lineage_id returned by a prior verification." },
+            "limit": { "type": "number", "description": "Max chain entries to return when no id is given. 1-500, defaults to 100." }
+          },
+          "required": []
+        },
+        "handler": "warrantRegistry",
+        "annotations": { "read_only_hint": true, "destructive_hint": false, "idempotent_hint": true }
+      }
+    ]
+  }
+}

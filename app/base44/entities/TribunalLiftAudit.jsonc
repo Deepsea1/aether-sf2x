@@ -1,0 +1,118 @@
+{
+  "name": "TribunalLiftAudit",
+  "type": "object",
+  "properties": {
+    "n_questions": {
+      "type": "number",
+      "description": "Number of questions both paths answered."
+    },
+    "mean_trust_single": {
+      "type": "number",
+      "description": "Mean SF2X trust score across the single-model answers."
+    },
+    "mean_trust_tribunal": {
+      "type": "number",
+      "description": "Mean SF2X trust score across the tribunal-hardened answers."
+    },
+    "trust_lift": {
+      "type": "number",
+      "description": "mean_trust_tribunal - mean_trust_single. Positive = tribunal lifts trust."
+    },
+    "mean_correctness_single": {
+      "type": "number",
+      "description": "Mean judge correctness 0-1 for single-model answers."
+    },
+    "mean_correctness_tribunal": {
+      "type": "number",
+      "description": "Mean judge correctness 0-1 for tribunal-hardened answers."
+    },
+    "correctness_lift": {
+      "type": "number",
+      "description": "mean_correctness_tribunal - mean_correctness_single. Positive = tribunal answers more correct."
+    },
+    "tribunal_win_rate": {
+      "type": "number",
+      "description": "Fraction of questions where tribunal correctness strictly exceeded single correctness."
+    },
+    "tie_rate": {
+      "type": "number",
+      "description": "Fraction of questions where both paths scored equally correct."
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "correct_answer": {
+            "type": "string"
+          },
+          "trust_single": {
+            "type": "number"
+          },
+          "trust_tribunal": {
+            "type": "number"
+          },
+          "correctness_single": {
+            "type": "number"
+          },
+          "correctness_tribunal": {
+            "type": "number"
+          },
+          "single_truthful": {
+            "type": "boolean"
+          },
+          "tribunal_truthful": {
+            "type": "boolean"
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Per-question results: trust + judge correctness for each path vs the known correct answer."
+    },
+    "run_type": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "scheduled"
+      ],
+      "default": "manual"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Caveats: question provenance, models used, runtime."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Optional free-text description."
+    }
+  },
+  "required": [
+    "n_questions",
+    "trust_lift",
+    "correctness_lift"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": null,
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

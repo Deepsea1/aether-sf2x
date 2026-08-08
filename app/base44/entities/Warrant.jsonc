@@ -1,0 +1,296 @@
+{
+  "name": "Warrant",
+  "type": "object",
+  "properties": {
+    "answer_version_id": {
+      "type": "string",
+      "description": "Reference to the AnswerVersion this warrant backs."
+    },
+    "premises": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Explicit premises the conclusion depends on. When the caller omits premises, these are projected from the verifier's atomic-claim decomposition so the warrant's signed content is self-verifying (Appendix A-1)."
+    },
+    "conclusion": {
+      "type": "string",
+      "description": "The warranted conclusion."
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claim": {
+            "type": "string"
+          },
+          "supported": {
+            "type": "boolean"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "note": {
+            "type": "string"
+          },
+          "authoritative_grounding": {
+            "type": "boolean"
+          }
+        }
+      },
+      "description": "Per-claim verification breakdown from the verifier: each atomic claim, whether it was supported, the verifier's confidence, and a note. Persisted so an explain/verdict surface can show the actual basis of the score, not a status echo (Appendix A-2)."
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Verifier-flagged issues: unsupported claims, missing sources, contradictions, staleness, non-authoritative grounding, falsifier strong, insufficient evidence, cross-firm contest. Persisted alongside claims for the verdict explanation."
+    },
+    "support_confidence": {
+      "type": "number",
+      "description": "Confidence that the claims are SUPPORTED by the cited/fetched evidence (the verifier's support verdict). Distinct from detectability \u2014 a claim can be well-supported yet rest on a record too thin to have caught a falsehood (Gate 2)."
+    },
+    "detectability_confidence": {
+      "type": "number",
+      "description": "Confidence that, were the claim false, the available sources would have DETECTED it (the coverage-check verdict). Low detectability on a load-bearing claim triggers insufficient_evidence. Stop conflating support with detectability (Gate 2)."
+    },
+    "falsification": {
+      "type": "object",
+      "description": "Gate 2 falsifier role result: the strongest case that the claim is FALSE, its strength, and the load-bearing claim. A 'strong' falsification caps the final verdict at 'weak' (or 'contested' when cross-firm) regardless of support ratio (veto weight). Attached verbatim so the warrant shows the counter-case, not just the affirming one.",
+      "properties": {
+        "falsification_strength": {
+          "type": "string",
+          "enum": [
+            "none",
+            "weak",
+            "strong"
+          ]
+        },
+        "argument": {
+          "type": "string"
+        },
+        "load_bearing_claim": {
+          "type": "string"
+        },
+        "vendor": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "cross_firm": {
+          "type": "boolean"
+        },
+        "ran": {
+          "type": "boolean"
+        }
+      }
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "description": "proposer | critic | verifier | falsifier | coverage | red_team."
+          },
+          "model_family": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Per-role model provenance for the run: which role, which model family, which vendor. Full transparency so cross_firm_verified is auditable (Gate 3)."
+    },
+    "confidence_score": {
+      "type": "number",
+      "description": "Top-level warrant confidence 0-1, computed from the verifier's overall confidence (or the tribunal verdict's confidence with a fallback to the verifier confidence). Never left dead at 0 when per-claim confidences are populated (Appendix A-4)."
+    },
+    "validity_status": {
+      "type": "string",
+      "enum": [
+        "valid",
+        "weak",
+        "invalid",
+        "insufficient_evidence",
+        "contested",
+        "expired"
+      ],
+      "default": "valid"
+    },
+    "expiry_date": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When premises should be revalidated."
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Cited sources supporting premises."
+    },
+    "authoritative_grounding": {
+      "type": "object",
+      "description": "Domain-authoritative source grounding summary: which cited sources are authoritative for the domain (PubMed, SEC EDGAR, statutes) vs generic web, how many claims trace to an authoritative source, and the trust penalty applied when a high-stakes claim is grounded only in non-authoritative content.",
+      "properties": {
+        "domain": {
+          "type": "string"
+        },
+        "has_authoritative_sources": {
+          "type": "boolean"
+        },
+        "authoritative_source_count": {
+          "type": "number"
+        },
+        "authoritative_sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "claims_authoritatively_grounded": {
+          "type": "number"
+        },
+        "total_claims": {
+          "type": "number"
+        },
+        "grounding_ratio": {
+          "type": "number"
+        },
+        "penalty_applied": {
+          "type": "number"
+        }
+      }
+    },
+    "grounding_notes": {
+      "type": "string",
+      "description": "Verifier's one-line assessment of whether the answer relied on authoritative sources or generic web content for the domain."
+    },
+    "source_snapshots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          },
+          "content_hash": {
+            "type": "string",
+            "description": "SHA-256 of the fetched content (first N bytes)."
+          },
+          "content_length": {
+            "type": "number"
+          },
+          "content_type": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Preserved evidence: a SHA-256 content hash + metadata of each cited source captured at attestation time, so the warrant remains provably grounded even if sources later rot or rewrite history."
+    },
+    "corroboration": {
+      "type": "object",
+      "properties": {
+        "count": {
+          "type": "number",
+          "description": "Distinct sources cited by >=2 of the independent answers."
+        },
+        "total_sources": {
+          "type": "number",
+          "description": "Total distinct sources across all answers."
+        },
+        "total_models": {
+          "type": "number",
+          "description": "How many independent answers contributed sources."
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The corroborating source URLs."
+        }
+      },
+      "description": "Source triangulation from the multi-model tribunal: how many cited sources were independently corroborated by 2+ of the answering AIs. Higher corroboration = the conclusion is grounded by overlapping evidence rather than consensus-by-coincidence."
+    },
+    "signed_hash": {
+      "type": "string",
+      "description": "Cryptographic signature artifact for attestation."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Optional free-text description."
+    }
+  },
+  "required": [
+    "answer_version_id",
+    "conclusion"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

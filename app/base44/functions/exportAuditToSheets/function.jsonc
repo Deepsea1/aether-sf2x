@@ -1,0 +1,4 @@
+{
+  "name": "exportAuditToSheets",
+  "entry": "entry.ts"
+}

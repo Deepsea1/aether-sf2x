@@ -1,0 +1,50 @@
+{
+  "name": "Correction Validation Debate",
+  "description": "When a CorrectionEvent is created, convene a three-AISystem tribunal (proposer/critic/verifier) over the corrected answer, log a Debate record, produce a tribunal-validated AnswerVersion, and update the original Inquiry.",
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "correction_validation_debate",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "settle": {
+          "wait": "PT5S",
+          "then": "run_debate",
+          "x-base44": {
+            "title": "Let the correction settle",
+            "description": "Ensure the corrected answer + warrant are persisted"
+          }
+        }
+      },
+      {
+        "run_debate": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "debateAndValidateCorrection",
+            "args": {
+              "correction_event_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Run tribunal + validate",
+            "description": "Debate, log AnswerVersion, update Inquiry"
+          }
+        }
+      }
+    ]
+  },
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "entity",
+      "events": [
+        "create"
+      ],
+      "entity_name": "CorrectionEvent"
+    }
+  }
+}

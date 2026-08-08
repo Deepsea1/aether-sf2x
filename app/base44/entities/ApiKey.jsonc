@@ -1,0 +1,82 @@
+{
+  "name": "ApiKey",
+  "type": "object",
+  "properties": {
+    "key": {
+      "type": "string",
+      "description": "The API key token (sk_sf2x_...)."
+    },
+    "user_id": {
+      "type": "string",
+      "description": "Owning customer (app user)."
+    },
+    "label": {
+      "type": "string",
+      "description": "Optional label, e.g. customer email."
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "expiry_date": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Optional expiry timestamp. When set, the key-expiry guard workflow warns the owner 7 days before and auto-revokes on expiry. Null/absent = never auto-expires."
+    },
+    "expiry_notified_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Internal flag set when the 7-day expiry warning was sent, so the owner isn't emailed daily. Cleared automatically when the key is renewed to a later date."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Optional free-text description."
+    }
+  },
+  "required": [
+    "key",
+    "user_id"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "create": {
+      "data.user_id": "{{user.id}}"
+    },
+    "update": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

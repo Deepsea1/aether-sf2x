@@ -1,0 +1,227 @@
+{
+  "name": "Claim",
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "The full claim text \u2014 a discrete, testable assertion."
+    },
+    "claim_id_ref": {
+      "type": "string",
+      "description": "External-style reference id (clm_...) for API/MCP compatibility."
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "benchmark_claim",
+        "security_claim",
+        "financial_claim",
+        "legal_claim",
+        "medical_claim",
+        "marketing_claim",
+        "technical_claim",
+        "factual_claim",
+        "historical_claim",
+        "general_claim"
+      ],
+      "default": "general_claim",
+      "description": "Claim category \u2014 drives which policy rule applies."
+    },
+    "subject": {
+      "type": "string",
+      "description": "What the claim is about (the entity being asserted)."
+    },
+    "predicate": {
+      "type": "string",
+      "description": "The relationship/action being asserted (e.g. 'reduces', 'is', 'requires')."
+    },
+    "object": {
+      "type": "string",
+      "description": "The value or target the subject is asserted to have/be."
+    },
+    "time_scope": {
+      "type": "string",
+      "description": "Temporal scope if the claim is time-bounded (e.g. 2026-Q3)."
+    },
+    "jurisdiction": {
+      "type": "string",
+      "description": "Legal/regulatory jurisdiction if applicable."
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "default": "medium",
+      "description": "Risk tier \u2014 controls evidence threshold + human review requirement."
+    },
+    "extraction_confidence": {
+      "type": "number",
+      "description": "0-1 confidence in the extraction (how cleanly the text was decomposed)."
+    },
+    "source_asset_type": {
+      "type": "string",
+      "enum": [
+        "answer_version",
+        "pr_diff",
+        "markdown",
+        "document",
+        "api_submission",
+        "manual"
+      ],
+      "default": "answer_version",
+      "description": "Where this claim was extracted from."
+    },
+    "source_asset_id": {
+      "type": "string",
+      "description": "Id of the source asset (AnswerVersion id, PR id, etc.)."
+    },
+    "source_excerpt": {
+      "type": "string",
+      "description": "The surrounding text the claim was extracted from (for context)."
+    },
+    "flash_signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "clear",
+              "info",
+              "warn",
+              "block"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Aether Flash deterministic risk signals detected on this claim."
+    },
+    "verdict_status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "supported",
+        "supported_with_limits",
+        "mixed",
+        "unsupported",
+        "contradicted",
+        "unverifiable",
+        "out_of_scope"
+      ],
+      "default": "pending",
+      "description": "Aether verdict taxonomy \u2014 the claim-level decision."
+    },
+    "verdict_confidence": {
+      "type": "number",
+      "description": "0-1 confidence in the verdict."
+    },
+    "coverage_state": {
+      "type": "string",
+      "enum": [
+        "unverified",
+        "sampled",
+        "partial",
+        "high_coverage",
+        "complete"
+      ],
+      "default": "unverified",
+      "description": "How thoroughly the claim's evidence was evaluated."
+    },
+    "policy_decision": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "allow",
+        "warn",
+        "require_review",
+        "block"
+      ],
+      "default": "pending",
+      "description": "The policy decision applied to this claim."
+    },
+    "evidence_pack_id": {
+      "type": "string",
+      "description": "The EvidencePack backing this claim's verdict."
+    },
+    "warrant_id": {
+      "type": "string",
+      "description": "The Warrant that signed this claim's verdict (when warranted)."
+    },
+    "tenant_id": {
+      "type": "string",
+      "description": "Tenant isolation key \u2014 the owning customer/app user."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Optional free-text description."
+    }
+  },
+  "required": [
+    "text"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "data.tenant_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "name": "Unpaid Subscription Dunning",
+  "description": "When a subscription is marked past_due (Stripe payment failed), email the subscriber, wait 3 days, then cancel the Stripe subscription and revoke their API keys if still unpaid.",
+  "trigger": {
+    "config": {
+      "trigger_type": "entity",
+      "entity_name": "Subscription",
+      "events": [
+        "update"
+      ]
+    },
+    "condition": "${ .trigger.data.status == \"past_due\" and .trigger.old_data.status != \"past_due\" }"
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "unpaid_subscription_dunning",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "send_email": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "sendDunningEmail",
+            "args": {
+              "subscription_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "wait_period",
+          "x-base44": {
+            "title": "Email the subscriber",
+            "description": "Payment-failed notice"
+          }
+        }
+      },
+      {
+        "wait_period": {
+          "wait": "P3D",
+          "then": "check_and_cancel",
+          "x-base44": {
+            "title": "Wait 3 days",
+            "description": "Grace period to recover"
+          }
+        }
+      },
+      {
+        "check_and_cancel": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "cancelUnpaidSubscription",
+            "args": {
+              "subscription_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Cancel + revoke if unpaid",
+            "description": "Cancel Stripe sub, deactivate API keys"
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "name": "CorrelationAudit",
+  "type": "object",
+  "properties": {
+    "dataset": {
+      "type": "string",
+      "description": "Benchmark the audit ran against, e.g. TruthfulQA-representative or HaluEval-representative."
+    },
+    "n_items": {
+      "type": "number",
+      "description": "Total items evaluated."
+    },
+    "n_true": {
+      "type": "number",
+      "description": "Number of ground-truth-true items."
+    },
+    "n_hallucinated": {
+      "type": "number",
+      "description": "Number of ground-truth-hallucinated / false items."
+    },
+    "pearson_r": {
+      "type": "number",
+      "description": "Pearson correlation between SF2X trust score and truth label (1=true, 0=hallucinated)."
+    },
+    "spearman_rho": {
+      "type": "number",
+      "description": "Spearman rank correlation between trust and truth label."
+    },
+    "auc": {
+      "type": "number",
+      "description": "ROC AUC treating trust score as the classifier score and truth as the positive class."
+    },
+    "accuracy": {
+      "type": "number",
+      "description": "Accuracy at the chosen threshold: trust >= threshold predicts true."
+    },
+    "threshold": {
+      "type": "number",
+      "description": "Trust threshold used for the accuracy figure."
+    },
+    "mean_trust_true": {
+      "type": "number",
+      "description": "Mean trust score across ground-truth-true items."
+    },
+    "mean_trust_false": {
+      "type": "number",
+      "description": "Mean trust score across ground-truth-hallucinated items."
+    },
+    "separation": {
+      "type": "number",
+      "description": "mean_trust_true - mean_trust_false; positive means trust separates truth from hallucination."
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claim": {
+            "type": "string"
+          },
+          "is_hallucination": {
+            "type": "boolean"
+          },
+          "trust": {
+            "type": "number"
+          },
+          "validity": {
+            "type": "string"
+          },
+          "support_ratio": {
+            "type": "number"
+          }
+        }
+      },
+      "description": "Per-item results: the claim, its ground-truth label, and the SF2X trust/validity it received."
+    },
+    "run_type": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "scheduled"
+      ],
+      "default": "manual"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Caveats: sample provenance, verifier model used, date."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Optional free-text description."
+    }
+  },
+  "required": [
+    "dataset",
+    "n_items",
+    "pearson_r"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": null,
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}
