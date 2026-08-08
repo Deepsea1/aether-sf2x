@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GitBranch, ShieldCheck, AlertTriangle, FileText, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { GitBranch, ShieldCheck, AlertTriangle, FileText, File, Loader2, ChevronDown, ChevronRight, Copy, Check, ExternalLink } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import { useToast } from '@/components/ui/use-toast';
 import PublicNav from '@/components/sf2x/PublicNav';
@@ -77,6 +77,155 @@ function ClaimRow({ claim, index }) {
         </div>
       )}
     </div>
+  );
+}
+
+// Groups claims by claim.file_path, preserving first-seen order. Claims without
+// a file_path (or with a falsy one) are bucketed under "Other".
+function groupClaimsByFile(claims) {
+  const groups = new Map();
+  for (const claim of claims) {
+    const key = claim.file_path || 'Other';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(claim);
+  }
+  return groups;
+}
+
+function FileGroup({ filePath, claims }) {
+  const [expanded, setExpanded] = useState(true);
+  return (
+    <div className="border border-white/10 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-left bg-white/[0.03] hover:bg-white/[0.05] transition-colors"
+      >
+        {expanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-500 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-500 shrink-0" />}
+        <File className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+        <span className="text-xs font-mono text-slate-300 truncate">{filePath}</span>
+        <span className="ml-auto shrink-0 text-[10px] text-slate-500 bg-white/5 rounded-full px-2 py-0.5">{claims.length}</span>
+      </button>
+      {expanded && (
+        <div className="p-2 space-y-2 bg-black/10">
+          {claims.map((claim, i) => (
+            <ClaimRow key={claim.id || `${filePath}-${i}`} claim={claim} index={i} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Small inline note surfacing result.pr_review — shows nothing when pr_review
+// is absent (older/different response shapes), an actionable success note
+// with a link to the posted GitHub review when posted, or a muted explanation
+// (not an error) when the connector couldn't post inline annotations.
+function PrReviewNote({ prReview }) {
+  if (!prReview) return null;
+  if (prReview.posted) {
+    const count = prReview.annotations ?? 0;
+    return (
+      <div className="flex flex-wrap items-center gap-2 text-xs text-emerald-400/90 border border-emerald-400/20 rounded-lg px-3 py-2 bg-emerald-400/5">
+        <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+        <span>{count} annotation{count === 1 ? '' : 's'} posted as a GitHub PR review.</span>
+        {prReview.review_url && (
+          <a
+            href={prReview.review_url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 underline hover:text-emerald-300"
+          >
+            View review <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-start gap-2 text-xs text-slate-500 border border-white/10 rounded-lg px-3 py-2 bg-white/[0.02]">
+      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+      <span>
+        Inline PR review annotations were not posted (likely missing <code className="text-slate-400">pulls:write</code> scope
+        on the GitHub connector). The gate decision and commit status above are unaffected.
+      </span>
+    </div>
+  );
+}
+
+// Builds a markdown summary of the verification result: gate decision, commit
+// status, claim counts, policy info, PR review status, and claims grouped by
+// file with their category/risk/flash_state/policy_decision.
+function buildMarkdownReport(result) {
+  const lines = [];
+  lines.push('# Aether PR Verification Report');
+  lines.push('');
+  if (result.owner && result.repo) {
+    lines.push(`**Repo:** ${result.owner}/${result.repo}${result.pull_number ? ` #${result.pull_number}` : ''}`);
+  }
+  if (result.head_sha) lines.push(`**Commit:** \`${result.head_sha}\``);
+  lines.push(`**Gate Decision:** ${(result.gate_decision || 'unknown').replace(/_/g, ' ').toUpperCase()}`);
+  lines.push(`**Commit Status:** ${result.commit_status || 'unknown'}${result.commit_description ? ` — ${result.commit_description}` : ''}`);
+  lines.push('');
+  lines.push('## Claim Counts');
+  lines.push(`- Total: ${result.claim_counts?.total ?? 0}`);
+  lines.push(`- Blocked: ${result.claim_counts?.blocked ?? 0}`);
+  lines.push(`- Require Review: ${result.claim_counts?.require_review ?? 0}`);
+  lines.push(`- Warned: ${result.claim_counts?.warned ?? 0}`);
+  lines.push(`- Clear: ${result.claim_counts?.clear ?? 0}`);
+  lines.push('');
+  lines.push('## Policy');
+  lines.push(`- Source: ${result.policy?.source ?? 'n/a'}`);
+  lines.push(`- Policy ID: ${result.policy?.policy_id ?? 'n/a'}`);
+  lines.push(`- Rules: ${result.policy?.rules_count ?? 0}`);
+
+  if (result.pr_review) {
+    lines.push('');
+    lines.push('## PR Review');
+    if (result.pr_review.posted) {
+      lines.push(`- Posted: yes (${result.pr_review.annotations ?? 0} annotation(s))`);
+      if (result.pr_review.review_url) lines.push(`- Review URL: ${result.pr_review.review_url}`);
+    } else {
+      lines.push('- Posted: no (likely missing pulls:write scope on the GitHub connector)');
+    }
+  }
+
+  lines.push('');
+  lines.push('## Claims');
+  const claims = result.claims || [];
+  if (!claims.length) {
+    lines.push('_No in-scope claims detected._');
+  } else {
+    for (const [filePath, groupClaims] of groupClaimsByFile(claims).entries()) {
+      lines.push('');
+      lines.push(`### ${filePath} (${groupClaims.length})`);
+      for (const claim of groupClaims) {
+        const category = claim.category || 'unknown';
+        const risk = claim.risk_level || 'unknown';
+        const flash = (claim.flash_state || 'unknown').replace(/_/g, ' ');
+        const policy = (claim.policy_decision || 'unknown').replace(/_/g, ' ');
+        lines.push(`- [${category}] risk: ${risk} · flash: ${flash} · policy: ${policy} — "${claim.text}"`);
+      }
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function CopyMarkdownButton({ result }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(buildMarkdownReport(result));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <button
+      onClick={copy}
+      className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 border border-white/10 rounded-lg px-2.5 py-1.5 transition-colors shrink-0"
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? 'Copied' : 'Copy as Markdown'}
+    </button>
   );
 }
 
@@ -261,6 +410,12 @@ export default function GitHubPrVerify() {
         {/* Results */}
         {result && (
           <div className="space-y-4">
+            {/* Results header */}
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Verification Results</div>
+              <CopyMarkdownButton result={result} />
+            </div>
+
             {/* Gate decision */}
             <div className={`border rounded-xl p-5 ${result.gate_decision === 'passed' ? 'border-emerald-400/30 bg-emerald-400/5' : result.gate_decision === 'blocked' ? 'border-red-400/30 bg-red-400/5' : 'border-amber-400/30 bg-amber-400/5'}`}>
               <div className="flex items-center justify-between">
@@ -279,6 +434,9 @@ export default function GitHubPrVerify() {
                 </div>
               </div>
             </div>
+
+            {/* PR review status */}
+            <PrReviewNote prReview={result.pr_review} />
 
             {/* Claim counts */}
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -306,12 +464,12 @@ export default function GitHubPrVerify() {
               <span>{result.policy?.rules_count} rules</span>
             </div>
 
-            {/* Claims list */}
+            {/* Claims list, grouped by file */}
             {result.claims && result.claims.length > 0 && (
               <div className="space-y-2">
                 <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Extracted Claims</div>
-                {result.claims.map((claim, i) => (
-                  <ClaimRow key={claim.id || i} claim={claim} index={i} />
+                {Array.from(groupClaimsByFile(result.claims).entries()).map(([filePath, groupClaims]) => (
+                  <FileGroup key={filePath} filePath={filePath} claims={groupClaims} />
                 ))}
               </div>
             )}
