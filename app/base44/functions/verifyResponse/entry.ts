@@ -253,6 +253,12 @@ Respond as a single JSON object.`;
       domain: 'verification',
       stakes_level: 'medium',
       status: 'answered',
+      // Record which customer this verification belongs to. These records are
+      // created via the request client from an x-api-key call with no Base44
+      // session, so created_by_id is not the caller — customer_id is the only
+      // owner attribution these lineages get, and gateApi's side-effect gate
+      // reads it. Null for anonymous/internal (landing demo, playground) calls.
+      customer_id: apiKey?.user_id || undefined,
       ip_hash: ipHash,
       description: `Widget verification · source=${source} · verdict=${verdict} · trust=${trust_score} · ${latency_ms}ms${ownKey ? ' · byok' : ''}`,
     });

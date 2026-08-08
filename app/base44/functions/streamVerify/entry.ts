@@ -76,8 +76,13 @@ Decompose the text into discrete factual claims, judge each as supported or unsu
           for (const c of claims) send({ stage: 'claim', claim: c });
 
           // Persist the verification.
+          // customer_id: these records are created via the request client from an
+          // x-api-key call with no Base44 session, so created_by_id is not the
+          // caller — customer_id is the only owner attribution these lineages get,
+          // and gateApi's side-effect gate reads it.
           const inquiry = await base44.entities.Inquiry.create({
             prompt: text.slice(0, 2000), domain: 'verification', stakes_level: 'medium', status: 'answered',
+            customer_id: apiKey.user_id,
             description: `Stream verification · source=${source} · verdict=${verdict} · trust=${trust_score}`,
           });
           const av = await base44.entities.AnswerVersion.create({
