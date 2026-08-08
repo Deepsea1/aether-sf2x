@@ -15,6 +15,7 @@ const GROUPS = [
       { to: '/multi-model', label: 'Multi-Model', Icon: Users },
       { to: '/arena', label: 'Red-Team Arena', Icon: Swords },
       { to: '/hall-of-fame', label: 'Hall of Fame', Icon: Award },
+      { to: '/warrant-proof', label: 'Warrant Proof', Icon: KeyRound },
     ],
   },
   {
@@ -32,6 +33,7 @@ const GROUPS = [
       { to: '/api-docs', label: 'API Docs', Icon: Code2 },
       { to: '/mcp', label: 'MCP Server', Icon: Plug },
       { to: '/warrant-spec', label: 'Warrant Spec', Icon: FileCheck },
+      { to: '/warrant-verifier', label: 'Verifier Spec', Icon: Scale },
       { to: '/github-action', label: 'GitHub Action', Icon: Github },
       { to: '/github-pr-verify', label: 'PR Verify', Icon: GitBranchIcon },
       { to: '/extension', label: 'Extension', Icon: Puzzle },

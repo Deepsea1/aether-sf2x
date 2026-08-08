@@ -106,7 +106,7 @@ export default function WarrantVerifier() {
         {/* How it works */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-12">
           {[
-            { Icon: Key, title: '1. Get the Public Key', desc: 'Aether\'s Ed25519 public key is published. Anyone can use it.' },
+            { Icon: Key, title: '1. Get the Public Key', desc: 'Look up any Ed25519-sealed warrant at /warrant-proof — the public key used to sign it is returned with the proof.' },
             { Icon: Code2, title: '2. Reconstruct Payload', desc: 'Concatenate answer_version_id, conclusion, and premises with | and ;; delimiters.' },
             { Icon: ShieldCheck, title: '3. Verify Signature', desc: 'Check the Ed25519 signature against the public key. If it matches, the warrant is authentic.' },
           ].map(s => (
@@ -157,15 +157,18 @@ export default function WarrantVerifier() {
           </div>
         </div>
 
-        {/* Public key */}
+        {/* Get the public key */}
         <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.03] p-6 mb-8">
-          <h2 className="text-sm uppercase tracking-wider text-emerald-300 mb-3">Aether Public Key</h2>
-          <pre className="text-xs text-slate-400 font-mono overflow-x-auto">-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE[...published key...]
------END PUBLIC KEY-----</pre>
-          <p className="text-xs text-slate-500 mt-3">
-            This key is fixed and publicly verifiable. Any warrant signed by Aether can be checked against it.
+          <h2 className="text-sm uppercase tracking-wider text-emerald-300 mb-3">Get the Public Key</h2>
+          <p className="text-sm text-slate-400 leading-relaxed">
+            Aether's Ed25519 public key isn't a single value printed on this page — it's returned live,
+            alongside the full cryptographic proof, for every Ed25519-sealed warrant. Look up any warrant
+            id or <code className="text-xs font-mono text-emerald-300/80">sf2x_</code> hash to get the
+            exact public key used to sign it, and verify the signature yourself.
           </p>
+          <a href="/warrant-proof" className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-emerald-300 hover:text-emerald-200">
+            Verify a live warrant now <ExternalLink className="h-3.5 w-3.5" />
+          </a>
         </div>
 
         <div className="text-center">
