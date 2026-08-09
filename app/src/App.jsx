@@ -66,6 +66,7 @@ const MultiModelCompare = lazy(() => import('@/pages/MultiModelCompare'));
 const GitHubAction = lazy(() => import('@/pages/GitHubAction'));
 const GitHubPrVerify = lazy(() => import('@/pages/GitHubPrVerify'));
 const Claims = lazy(() => import('@/pages/Claims'));
+const PublicClaims = lazy(() => import('@/pages/PublicClaims'));
 const Terms = lazy(() => import('@/pages/Terms'));
 const Privacy = lazy(() => import('@/pages/Privacy'));
 const CompetitiveMatrix = lazy(() => import('@/pages/CompetitiveMatrix'));
@@ -193,6 +194,7 @@ const AuthenticatedApp = () => {
       <Route path="/monthly-report" element={<MonthlyReport />} />
       <Route path="/warrant-verifier" element={<WarrantVerifier />} />
       <Route path="/warrant-proof" element={<WarrantProof />} />
+      <Route path="/public/claims" element={<PublicClaims />} />
       <Route path="/fast-path" element={<FastPath />} />
       <Route path="/pitch" element={<PitchDeck />} />
       <Route path="/domain-benchmarks" element={<DomainBenchmarks />} />

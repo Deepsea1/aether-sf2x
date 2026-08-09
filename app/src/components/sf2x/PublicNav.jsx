@@ -16,6 +16,7 @@ const GROUPS = [
       { to: '/arena', label: 'Red-Team Arena', Icon: Swords },
       { to: '/hall-of-fame', label: 'Hall of Fame', Icon: Award },
       { to: '/warrant-proof', label: 'Warrant Proof', Icon: KeyRound },
+      { to: '/public/claims', label: 'Public Claims', Icon: FileText },
     ],
   },
   {
