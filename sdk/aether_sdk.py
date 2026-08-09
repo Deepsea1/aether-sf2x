@@ -11,9 +11,12 @@ Fixed here versus that inline version (all live-probed 2026-08-09):
   * Base URL is the app domain. The old
     `api.base44.com/apps/<id>/backend/functions` base returns 404 with an HTML
     page for every function.
-  * `batch_verify` and `verify_webhook` raise a clear NotDeployedError instead of
-    a confusing 404, because those two backend functions are not currently
-    deployed (`404 "Backend function '...' not found or not deployed"`).
+  * `batch_verify` and `verify_webhook` call the API normally. They were briefly
+    gated behind NotDeployedError while those two backend functions were
+    undeployed; both were deployed on 2026-08-09 (re-probed: 401 "Missing
+    x-api-key header", i.e. present and auth-gated, rather than 404 "not found or
+    not deployed"), so the gate is gone. NotDeployedError is still exported and is
+    still raised if the API itself reports a function as not deployed.
 
 Requires: requests  (pip install requests)
 """
@@ -27,8 +30,10 @@ import requests
 
 DEFAULT_BASE_URL = "https://aether.sf2x.com/api/functions"
 
-#: Backend functions confirmed not deployed as of 2026-08-09.
-NOT_DEPLOYED = ("batchVerify", "webhookVerify")
+#: Backend functions known to be undeployed. Empty: batchVerify and webhookVerify
+#: were deployed on 2026-08-09, so nothing is pre-emptively blocked. Kept as the
+#: single place to list a function again if one is ever withdrawn.
+NOT_DEPLOYED: tuple = ()
 
 __all__ = ["AetherClient", "AetherError", "NotDeployedError", "DEFAULT_BASE_URL"]
 
@@ -84,6 +89,18 @@ class AetherClient:
         except requests.RequestException as exc:  # network-level failure
             raise AetherError(f"request to {url} failed: {exc}") from exc
 
+        if response.status_code == 404:
+            try:
+                detail = response.json()
+            except ValueError:
+                detail = {}
+            if "not deployed" in str(detail).lower() or "not found" in str(detail).lower():
+                raise NotDeployedError(
+                    f"The '{function}' backend function is not deployed on the Aether app: {detail}",
+                    status=404,
+                    body=detail,
+                )
+
         if not response.ok:
             body: Any
             try:
@@ -115,7 +132,11 @@ class AetherClient:
     def batch_verify(
         self, texts: List[str], options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Verify multiple texts in one request (max 50). NOT CURRENTLY DEPLOYED."""
+        """Verify multiple texts in one request (max 50).
+
+        COST: the tribunal runs once PER TEXT, so a 50-text batch costs ~50x a
+        single verify. Budget accordingly.
+        """
         if not texts:
             raise ValueError("texts must be a non-empty list")
         if len(texts) > 50:
@@ -128,7 +149,7 @@ class AetherClient:
     def verify_webhook(
         self, text: str, webhook_url: str, verification_id: str = ""
     ) -> Dict[str, Any]:
-        """Verify text and POST the result to a webhook. NOT CURRENTLY DEPLOYED."""
+        """Verify text and POST the result to a webhook."""
         if not text or not text.strip():
             raise ValueError("text is required")
         if not webhook_url:

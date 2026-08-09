@@ -28,19 +28,26 @@ Get your API key from the Aether dashboard at https://aether.sf2x.com/api-docs.
 
 ## Endpoint status
 
-Live-probed 2026-08-09 against the base URL above:
+Re-probed 2026-08-09 (later the same day) against the base URL above. **All four are
+live.**
 
 | Endpoint | Status |
 |---|---|
-| `/warrantApi` | ✅ Live — returns `401` without a key, as expected |
-| `/verifyResponse` | ⚠️ Reachable, but currently returns `500 {"error":"Permission denied for create operation on Inquiry entity"}` — a server-side permission issue on the Base44 app, not a client error |
-| `/batchVerify` | ❌ **Not deployed** — `404 {"message":"Backend function 'batchVerify' not found or not deployed"}` |
-| `/webhookVerify` | ❌ **Not deployed** — same `404` |
+| `/verifyResponse` | ✅ Live — `200` with a real tribunal verdict |
+| `/batchVerify` | ✅ Live — `401 "Missing x-api-key header"` without a key (present and auth-gated) |
+| `/webhookVerify` | ✅ Live — `401` without a key |
+| `/warrantApi` | ✅ Live — `401` without a key |
 
-The two `404` endpoints are documented below **as designed, not as available.** They
-must be deployed on the Base44 app before the examples using them will work; until
-then treat those sections as a specification. Nothing in this repository can deploy
-them — the backend functions live in the Base44 app, outside any git repo.
+> **Earlier today this table said otherwise, and it was right at the time.**
+> `/batchVerify` and `/webhookVerify` answered `404 "Backend function … not found or
+> not deployed"`, and `/verifyResponse` answered `500 "Permission denied for create
+> operation on Inquiry entity"`. All three were fixed on the Base44 side. The
+> distinction that matters when re-checking: a **`404` naming the function** means it
+> is not deployed, whereas a **`401` asking for `x-api-key`** means it is deployed and
+> simply wants a key.
+
+⚠️ **`/batchVerify` carries a cost multiplier — see its section below before using it
+in anything user-facing.**
 
 ## Endpoints
 
@@ -90,25 +97,25 @@ curl -X POST https://aether.sf2x.com/api/functions/verifyResponse \
 
 ### 2. Batch Verify
 
-> ⚠️ **NOT DEPLOYED (live-probed 2026-08-09).** Returns
-> `404 {"message":"Backend function 'batchVerify' not found or not deployed"}`.
-> Deployment is intended — see the cost guard below, which should land **with** it.
+> ✅ **Deployed** (re-probed 2026-08-09).
 >
-> 💸 **COST GUARD REQUIRED BEFORE DEPLOYING.** One `batchVerify` call runs the full
-> tribunal **once per text**, up to 50 times. The rate limits in this document are
-> counted **per request**, so as specified this endpoint is a 50× denial-of-wallet
-> multiplier: a Free-tier caller nominally limited to 100 requests/month could trigger
-> **5,000 tribunal runs** — 50× the intended spend — without exceeding their quota.
+> 💸 **COST WARNING — this endpoint is now live and un-metered per text.** One
+> `batchVerify` call runs the full tribunal **once per text**, up to 50 times, while the
+> rate limits in this document are counted **per request**. That is a 50× spend
+> multiplier: a Free-tier caller nominally limited to 100 requests/month can trigger
+> **5,000 tribunal runs** without exceeding their quota.
 >
-> Deploy with at least one of:
+> Fix it with at least one of:
 > 1. **Meter per text, not per request** — charge `len(texts)` against the caller's
->    quota. This is the real fix; it makes the multiplier impossible.
+>    quota. This is the real fix; it makes the multiplier impossible. A ready-made,
+>    tested implementation is in
+>    [`mcp-worker/src/batchQuota.js`](../mcp-worker/src/batchQuota.js).
 > 2. **Cap batch size by tier** — e.g. Free 5, Starter 20, Pro/Enterprise 50.
 > 3. **Reject the batch** when `len(texts)` exceeds the caller's remaining quota,
 >    rather than partially running it and billing for the rest.
 >
-> `/webhookVerify` does **not** carry this risk: it is one tribunal run per call, the
-> same cost as `/verifyResponse`.
+> `/webhookVerify` does **not** carry this risk: one tribunal run per call, the same
+> cost as `/verifyResponse`.
 
 **POST** `/batchVerify`
 
@@ -183,16 +190,16 @@ print(f"Average trust score: {data['summary']['average_trust_score']}/100")
 
 ### 3. Webhook Verification
 
-> ⚠️ **NOT DEPLOYED (live-probed 2026-08-09).** Returns
-> `404 {"message":"Backend function 'webhookVerify' not found or not deployed"}`.
-> Deployment is intended, and this one is cost-safe: **one tribunal run per call**, the
+> ✅ **Deployed** (re-probed 2026-08-09). Cost-safe: **one tribunal run per call**, the
 > same spend as `/verifyResponse`, with no batching multiplier.
 >
-> One security note for whoever implements it: `webhook_url` is caller-supplied and is
+> ⚠️ **One security item to confirm in the deployed implementation:** `webhook_url` is caller-supplied and is
 > therefore an SSRF vector. It must be validated before the outbound POST — reject
 > non-`http(s)` schemes and localhost / private / link-local addresses (including
 > `169.254.169.254`, the cloud metadata endpoint). The MCP worker already does exactly
 > this in `mcp-worker/src/ssrf.js`; reuse that logic rather than writing it twice.
+> **This has not been verified against the deployed function** — a caller who can pass
+> an arbitrary `webhook_url` can otherwise make your backend probe its own network.
 
 **POST** `/webhookVerify`
 

@@ -183,7 +183,7 @@ The extension's sole purpose is to verify the factual accuracy and reliability o
 | Permission / Access | Specific Purpose | Justification |
 | :--- | :--- | :--- |
 | `storage` | Store extension settings and user API keys locally | Essential for saving user preferences and custom credentials locally without external cookie tracking. |
-| `host_permissions` (`https://api.base44.com/*`) | Send verification requests to Aether API | Necessary for transmitting the selected AI text to the multi-model tribunal service and receiving trust scores and corrections. |
+| `host_permissions` (`https://aether.sf2x.com/*`) | Send verification requests to Aether API | Necessary for transmitting the selected AI text to the multi-model tribunal service and receiving trust scores and corrections. |
 | `content_scripts` (`chatgpt.com/*`, `claude.ai/*`, `gemini.google.com/*`, `copilot.microsoft.com/*`, `perplexity.ai/*`, `poe.com/*`, `character.ai/*`) | Detect AI responses and inject the "Verify" UI | Strictly limited to major AI assistant domains to allow users to trigger verification directly within their chat workflow. |
 
 ### Data Handling Disclosures
@@ -203,7 +203,7 @@ Aether has a single, narrow purpose: to verify the factual accuracy of AI-genera
 
 All requested extension permissions and host access directly serve this single function:
 - Content scripts run exclusively on designated AI chat host domains (chatgpt.com, chat.openai.com, claude.ai, gemini.google.com, copilot.microsoft.com, perplexity.ai, poe.com, character.ai) for the sole purpose of injecting the 'Verify with Aether' button adjacent to generated AI responses.
-- Host permission (https://api.base44.com/*) is strictly used to send the user-initiated claim payload to the 3-model tribunal backend and return the trust score and factual breakdown.
+- Host permission (https://aether.sf2x.com/*) is strictly used to send the user-initiated claim payload to the 3-model tribunal backend and return the trust score and factual breakdown.
 - Storage permission (chrome.storage) is used exclusively to save the user's API key and interface configuration locally within the browser.
 
 Aether does not perform background web monitoring, does not collect general user browsing history, does not inject advertisements, and only executes verification when explicitly commanded by the user clicking the inline verification button.

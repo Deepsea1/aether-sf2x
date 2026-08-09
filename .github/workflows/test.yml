@@ -76,6 +76,48 @@ jobs:
           test -f "github-action/$main" || { echo "::error::action.yml points at github-action/$main which does not exist"; exit 1; }
           echo "entrypoint present"
 
+  chrome-extension:
+    name: extension endpoint + host permission
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The packaged extension shipped calling a host that 404s, with
+      # host_permissions locked to that same dead host — so Chrome would have blocked
+      # the correct one even after a URL fix. Nothing caught it. This does.
+      - name: manifest host_permissions must cover the host the code calls
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/ext && mkdir -p /tmp/ext
+          unzip -q chrome-extension/aether-extension.zip -d /tmp/ext
+          cd /tmp/ext/extension
+
+          if grep -rn "api\.base44\.com" manifest.json background.js content.js; then
+            echo "::error::the extension references api.base44.com, which returns 404"
+            exit 1
+          fi
+          if grep -rnE "['\"]Authorization['\"]" background.js content.js; then
+            echo "::error::the extension sends an Authorization header; the API requires x-api-key"
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json, re, sys, urllib.parse
+          m = json.load(open('manifest.json'))
+          hosts = m.get('host_permissions') or []
+          allowed = {urllib.parse.urlparse(h.replace('*://','https://')).hostname for h in hosts}
+          called = set()
+          for f in ('background.js', 'content.js'):
+              called |= set(re.findall(r'https://([a-z0-9.\-]+)/', open(f).read()))
+          missing = {h for h in called if h not in allowed}
+          print('host_permissions:', sorted(allowed))
+          print('hosts called    :', sorted(called))
+          if missing:
+              print(f'::error::called host(s) {sorted(missing)} are not in host_permissions — Chrome will block them')
+              sys.exit(1)
+          print('every called host is permitted')
+          PY
+
   sdk:
     name: SDK tests
     runs-on: ubuntu-latest

@@ -69,7 +69,7 @@ The tribunal caught the fabricated citations in Claude and Llama, while verifyin
 - **GitHub Action:** https://github.com/Deepsea1/aether-sf2x/tree/main/github-action
 
 ```bash
-curl -X POST https://api.base44.com/apps/6a6babb38b48187e5d4799c4/backend/functions/verifyResponse \
+curl -X POST https://aether.sf2x.com/api/functions/verifyResponse \
   -H "Content-Type: application/json" \
   -d '{"text": "According to Section 4.1, all employees get 15 vacation days."}'
 

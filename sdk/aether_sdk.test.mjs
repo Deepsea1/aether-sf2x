@@ -101,27 +101,47 @@ describe('verify', () => {
   });
 });
 
-describe('undeployed endpoints fail clearly, not with a mystery 404', () => {
-  test('batchVerify throws NotDeployedError without calling fetch', async () => {
-    let called = false;
-    const c = new AetherClient('k', { fetchImpl: async () => { called = true; } });
-    await assert.rejects(() => c.batchVerify(['a']), (err) => {
-      assert.ok(err instanceof NotDeployedError);
-      assert.match(err.message, /not deployed/);
-      return true;
+describe('batchVerify + verifyWebhook actually call the API', () => {
+  // These were briefly gated behind NotDeployedError while the backend functions were
+  // undeployed. Both were deployed 2026-08-09, so a client-side block would refuse
+  // endpoints that work — the bug these tests now prevent.
+  test('batchVerify posts to /batchVerify instead of throwing', async () => {
+    let url = null;
+    const c = new AetherClient('k', {
+      fetchImpl: async (u) => { url = u; return { ok: true, status: 200, json: async () => OK }; },
     });
-    assert.equal(called, false);
+    await c.batchVerify(['a', 'b']);
+    assert.match(url, /\/batchVerify$/);
   });
 
-  test('verifyWebhook throws NotDeployedError', async () => {
-    const c = new AetherClient('k', { fetchImpl: okFetch });
-    await assert.rejects(() => c.verifyWebhook('a', 'https://x.test/h'), NotDeployedError);
+  test('verifyWebhook posts to /webhookVerify with the snake_case body', async () => {
+    let seen = null;
+    const c = new AetherClient('k', {
+      fetchImpl: async (u, init) => { seen = { u, init }; return { ok: true, status: 200, json: async () => OK }; },
+    });
+    await c.verifyWebhook('text here', 'https://x.test/h', 'vid');
+    assert.match(seen.u, /\/webhookVerify$/);
+    const body = JSON.parse(seen.init.body);
+    assert.equal(body.webhook_url, 'https://x.test/h');
+    assert.equal(body.verification_id, 'vid');
   });
 
-  test('input validation still runs first', async () => {
-    const c = new AetherClient('k', { fetchImpl: okFetch });
+  test('a real "not deployed" 404 from the API still raises NotDeployedError', async () => {
+    const c = new AetherClient('k', {
+      fetchImpl: async () => ({
+        ok: false, status: 404,
+        json: async () => ({ message: "Backend function 'batchVerify' not found or not deployed" }),
+      }),
+    });
+    await assert.rejects(() => c.batchVerify(['a']), NotDeployedError);
+  });
+
+  test('input validation still runs before any request', async () => {
+    let called = false;
+    const c = new AetherClient('k', { fetchImpl: async () => { called = true; return { ok: true, status: 200, json: async () => OK }; } });
     await assert.rejects(() => c.batchVerify([]), /non-empty array/);
     await assert.rejects(() => c.batchVerify(new Array(51).fill('x')), /at most 50/);
+    assert.equal(called, false);
   });
 });
 

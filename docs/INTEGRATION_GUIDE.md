@@ -1,10 +1,10 @@
 # Aether by SF2X — Integration Guide
 
-> ⚠️ **The Zapier and Make sections below depend on the `/webhookVerify` endpoint,
-> which is NOT currently deployed** — live-probed 2026-08-09, it returns `404
-> "Backend function 'webhookVerify' not found or not deployed"`. Those two
-> integrations cannot work until it is deployed on the Base44 app. The **Slack /
-> Teams alerting** section further down does not depend on it and works today.
+> ✅ **The `/webhookVerify` endpoint the Zapier and Make sections depend on is now
+> deployed** (re-probed 2026-08-09: `401 "Missing x-api-key header"`, i.e. present and
+> auth-gated). An earlier revision of this guide said it was undeployed; that was true
+> at the time and is no longer. Remember to send the `x-api-key` header — every example
+> below now does.
 
 ## Zapier Integration
 
