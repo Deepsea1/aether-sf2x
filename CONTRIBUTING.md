@@ -33,7 +33,7 @@ We use these breaches to train the red-team loop. Every breach makes the tribuna
 1. Fork the repo
 2. Create a branch: `git checkout -b feature/my-feature`
 3. Make your changes
-4. Test: `curl -X POST https://api.base44.com/apps/6a6babb38b48187e5d4799c4/backend/functions/verifyResponse -H "Content-Type: application/json" -d '{"text": "test"}'`
+4. Test: `curl -X POST https://aether.sf2x.com/api/functions/verifyResponse -H "Content-Type: application/json" -d '{"text": "test"}'`
 5. Submit a PR with a clear description
 
 ## 📝 Code Style

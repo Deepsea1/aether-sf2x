@@ -1,0 +1,117 @@
+name: test
+
+# Runs the worker's unit tests on every pull request and every push to main.
+#
+# Why this exists: the mcp-worker suite is written with Node's built-in test runner
+# (no dependencies), but tests only protect the repo if something actually runs them.
+# Before this workflow the suite was inert — a change could break every alerting and
+# comparison guarantee and still merge green, because nothing checked.
+#
+# No secrets are used and no network calls are made: every test injects its own fetch
+# and none configures a vendor key, so this job can never reach a paid API.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mcp-worker:
+    name: mcp-worker unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # `node --test` is built in, so there is nothing to install. Skipping the
+      # install keeps the job fast and keeps a vendor dependency out of CI.
+      - name: Run tests
+        working-directory: mcp-worker
+        run: npm test
+
+      - name: Syntax-check the worker entry and modules
+        working-directory: mcp-worker
+        run: |
+          for f in worker.js src/*.js; do
+            node --check "$f"
+          done
+          echo "all modules parse"
+
+  github-action:
+    name: hallucination-guard gate tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # The Action is dependency-free and runs from source, so there is nothing to
+      # build — but the rule that fails a customer's build must stay covered.
+      - name: Run gate tests
+        run: node --test github-action/gate.test.mjs
+
+      - name: Syntax-check the Action
+        run: |
+          node --check github-action/index.mjs
+          node --check github-action/gate.mjs
+          echo "action parses"
+
+      - name: action.yml entrypoint must exist
+        run: |
+          main=$(grep -E "^\s*main:" github-action/action.yml | sed -E "s/.*main:\s*'?([^']+)'?.*/\1/")
+          echo "action.yml main = $main"
+          test -f "github-action/$main" || { echo "::error::action.yml points at github-action/$main which does not exist"; exit 1; }
+          echo "entrypoint present"
+
+  sdk:
+    name: SDK tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The JS SDK injects its own fetch in every test — no network, no key.
+      - name: JavaScript SDK tests
+        run: node --test sdk/aether_sdk.test.mjs
+
+      - name: Python SDK compiles and imports
+        run: |
+          pip install --quiet requests
+          python -m py_compile sdk/aether_sdk.py
+          python -c "import sys; sys.path.insert(0, 'sdk'); from aether_sdk import AetherClient, NotDeployedError; print('python sdk imports')"
+
+      # The base URL and auth header were both wrong across this repo once. These two
+      # greps keep the shipped clients from regressing to the broken values.
+      - name: Shipped SDKs must not use the dead base URL or Bearer auth
+        run: |
+          # Matches QUOTED usage only. A looser pattern also matched the comments
+          # that explain these very fixes, which would fail the job on its own docs.
+          if grep -nE "['\"]https://api\.base44\.com" sdk/aether_sdk.py sdk/aether_sdk.js; then
+            echo "::error::an SDK points at the api.base44.com base, which returns 404"
+            exit 1
+          fi
+          if grep -nE "['\"]Authorization['\"]" sdk/aether_sdk.py sdk/aether_sdk.js; then
+            echo "::error::an SDK sets an Authorization header; the Aether API requires x-api-key"
+            exit 1
+          fi
+          echo "shipped SDKs use the live base URL and x-api-key"

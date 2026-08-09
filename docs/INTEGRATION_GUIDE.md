@@ -1,5 +1,11 @@
 # Aether by SF2X — Integration Guide
 
+> ⚠️ **The Zapier and Make sections below depend on the `/webhookVerify` endpoint,
+> which is NOT currently deployed** — live-probed 2026-08-09, it returns `404
+> "Backend function 'webhookVerify' not found or not deployed"`. Those two
+> integrations cannot work until it is deployed on the Base44 app. The **Slack /
+> Teams alerting** section further down does not depend on it and works today.
+
 ## Zapier Integration
 
 ### Trigger: New Verification Result
@@ -13,8 +19,9 @@ Use Aether's webhook verification to trigger Zapier workflows when an AI respons
 5. Call Aether's webhookVerify endpoint with that URL:
 
 ```bash
-curl -X POST https://api.base44.com/apps/6a6babb38b48187e5d4799c4/backend/functions/webhookVerify \
+curl -X POST https://aether.sf2x.com/api/functions/webhookVerify \
   -H "Content-Type: application/json" \
+  -H "x-api-key: $AETHER_API_KEY" \
   -d '{
     "text": "Your AI response to verify",
     "webhook_url": "https://hooks.zapier.com/hooks/catch/your-zap-id/"
