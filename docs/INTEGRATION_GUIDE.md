@@ -56,6 +56,92 @@ curl -X POST https://api.base44.com/apps/6a6babb38b48187e5d4799c4/backend/functi
 
 ## Slack App Integration
 
+### Managed alerting — `POST /alerts/dispatch` (recommended)
+
+Instead of hand-rolling a card, hand a verification to the Aether MCP worker and let it
+decide whether the result is worth paging a channel about, then format and deliver it.
+
+```bash
+curl -X POST https://aether-mcp.campiper84.workers.dev/alerts/dispatch \
+  -H "Authorization: Bearer $AETHER_MCP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "verification": { "trust_score": 45, "verdict": "rejected", "domain": "Legal",
+                      "flags": ["Unverified citation reference detected"],
+                      "lineage_id": "lin_123" },
+    "webhook_url": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+  }'
+```
+
+**`verification`** accepts any shape Aether already produces — a `verifyResponse` body, an
+outbound `verification.complete` webhook event (wrapped in `data` or not), or a warrant
+record. Fields it is not given stay absent rather than being guessed at.
+
+**`webhook_url`** works for both Slack and Microsoft Teams; the channel is inferred from
+the host. Pass `"channel": "slack" | "teams"` explicitly for any other endpoint.
+
+#### Trigger policy
+
+Alerts fire only when a rule matches (rules are OR'd). Defaults:
+
+| Rule | Default | Meaning |
+|---|---|---|
+| `minTrustScore` | `70` | Alert when the trust score is below this |
+| `verdicts` | `["rejected"]` | Alert on these verdicts |
+| `fabricatedCitationInHighRiskDomain` | `true` | Alert on an unverifiable citation in Legal / Medicine / Health / Finance |
+| `fabricatedCitationAnywhere` | `false` | Opt in to citation alerts in every domain |
+
+```json
+{ "rules": { "minTrustScore": 85, "verdicts": ["rejected", "contested"] } }
+```
+
+A verification with **no** trust score does not trigger the score rule — an absent score
+is not a low score, and treating it as `0` would page the team on every partial payload.
+
+#### Response
+
+```json
+{
+  "alerted": true,
+  "reasons": ["Trust score 45 is below the threshold of 70", "Verdict is \"rejected\""],
+  "channel": "slack",
+  "policy": { "minTrustScore": 70, "verdicts": ["rejected"] },
+  "delivery": { "ok": true, "status": 200 }
+}
+```
+
+`"alerted": false` with `"delivery": null` is a **success**: the rules were evaluated and
+nothing warranted an alert. `reasons` always explains the decision either way.
+
+#### Preview a card without sending it
+
+```bash
+curl -X POST .../alerts/dispatch -H "Authorization: Bearer $AETHER_MCP_TOKEN" \
+  -d '{ "verification": {...}, "channel": "slack", "dry_run": true }'
+```
+
+Returns the exact payload under `payload` and delivers nothing. Add `"force": true` to
+format a card even when no rule fires (useful for testing a channel end to end).
+
+#### What the card shows
+
+Trust-score gauge (`████░░░░░░ 45/100`), the verdict and domain, why the alert fired, the
+unsupported claims each with the tribunal's reason, the supported claims beside them, any
+corrections, and a **View Cryptographic Warrant** button. When a payload carries no
+per-claim breakdown the card says so, rather than implying everything passed.
+
+#### Security
+
+- Auth is the same static bearer as the MCP endpoint, and **fails closed** — no token
+  configured means every request is rejected.
+- `webhook_url` is customer-supplied and therefore an SSRF vector. It is checked against
+  the shared guard before any request: non-`http(s)` schemes and localhost / private /
+  link-local addresses (including `169.254.169.254`) are refused, and the request is
+  never made.
+- Rate limited per caller and per IP on the same counters as the MCP tools.
+- A delivery failure returns `502` with the reason and never throws, so an alerting
+  outage cannot take down the verification path that triggered it.
+
 ### Direct webhook to Slack
 ```bash
 # After verification, post to Slack

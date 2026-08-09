@@ -24,6 +24,8 @@
 import { buildProvider } from './src/oauth.js';
 import { runMcp, TOOLS } from './src/mcp-core.js';
 import { validStaticBearer, staticIdentity } from './src/auth.js';
+import { handleAlertsDispatch } from './src/alertsRoute.js';
+import { CHANNEL_BUILDERS } from './src/alerts.js';
 
 // The OAuthProvider is a pure config object; build it once per isolate, lazily, so
 // it can read MCP_PUBLIC_URL from env.
@@ -49,6 +51,8 @@ export default {
         auth_required: staticConfigured, // legacy field name, kept for back-compat
         oauth: true,
         warrant_api_configured: !!(env.AETHER_WARRANT_API_URL || '').trim(),
+        // Non-MCP capabilities served by this worker.
+        alert_channels: Object.keys(CHANNEL_BUILDERS),
       });
     }
 
@@ -62,6 +66,13 @@ export default {
         status: 401,
         headers: { 'WWW-Authenticate': 'Bearer' },
       });
+    }
+
+    // Real-time hallucination alerting — Slack / Teams. Static bearer only (the same
+    // credential as the legacy MCP root); the handler owns its own rate limiting and
+    // re-checks the customer-supplied webhook URL against the SSRF guard.
+    if (req.method === 'POST' && p === '/alerts/dispatch') {
+      return handleAlertsDispatch(req, env);
     }
 
     // A client reconfigured to `/mcp` may still present the static bearer; honor it
