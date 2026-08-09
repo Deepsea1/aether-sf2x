@@ -16,8 +16,12 @@
  *   · A non-2xx response now throws with the status instead of silently resolving to
  *     the error body — the old version returned `res.json()` unconditionally, so a
  *     401 looked like a verification result with no trust score.
- *   · `batchVerify` / `verifyWebhook` throw NotDeployedError rather than a confusing
- *     404, because those backend functions are not currently deployed.
+ *   · `batchVerify` / `verifyWebhook` call the API normally. They were briefly gated
+ *     behind NotDeployedError while those backend functions were undeployed; both were
+ *     deployed on 2026-08-09 (re-probed: 401 "Missing x-api-key header", i.e. present
+ *     and auth-gated, rather than 404 "not found or not deployed"), so the gate is
+ *     gone. NotDeployedError is still thrown if the API itself reports a function as
+ *     not deployed.
  *
  * Requires Node 18+ (global fetch). No dependencies.
  */
@@ -26,8 +30,12 @@
 
 const DEFAULT_BASE_URL = 'https://aether.sf2x.com/api/functions';
 
-/** Backend functions confirmed not deployed as of 2026-08-09. */
-const NOT_DEPLOYED = new Set(['batchVerify', 'webhookVerify']);
+/**
+ * Backend functions known to be undeployed. Empty: batchVerify and webhookVerify were
+ * deployed on 2026-08-09, so nothing is pre-emptively blocked. Kept as the single place
+ * to list a function again if one is ever withdrawn.
+ */
+const NOT_DEPLOYED = new Set();
 
 class AetherError extends Error {
   constructor(message, status = null, body = null) {
@@ -100,6 +108,14 @@ class AetherClient {
       body = null;
     }
 
+    // Surface a genuine "not deployed" from the API as NotDeployedError, rather than
+    // pre-emptively blocking the call.
+    if (res.status === 404 && /not deployed|not found/i.test(JSON.stringify(body))) {
+      throw new NotDeployedError(
+        `The '${fn}' backend function is not deployed on the Aether app: ${JSON.stringify(body)}`,
+      );
+    }
+
     if (!res.ok) {
       const hint = res.status === 401 && !this.apiKey ? ' (no API key was provided)' : '';
       throw new AetherError(
@@ -118,7 +134,11 @@ class AetherClient {
     return this._post('verifyResponse', { text });
   }
 
-  /** Verify up to 50 texts in one request. NOT CURRENTLY DEPLOYED. */
+  /**
+   * Verify up to 50 texts in one request.
+   * COST: the tribunal runs once PER TEXT, so a 50-text batch costs ~50x a single
+   * verify. Budget accordingly.
+   */
   async batchVerify(texts, options = {}) {
     if (!Array.isArray(texts) || texts.length === 0) {
       throw new TypeError('texts must be a non-empty array');
@@ -127,7 +147,7 @@ class AetherClient {
     return this._post('batchVerify', { texts, options });
   }
 
-  /** Verify text and POST the result to a webhook. NOT CURRENTLY DEPLOYED. */
+  /** Verify text and POST the result to a webhook. */
   async verifyWebhook(text, webhookUrl, verificationId = '') {
     if (!text || !String(text).trim()) throw new TypeError('text is required');
     if (!webhookUrl) throw new TypeError('webhookUrl is required');
