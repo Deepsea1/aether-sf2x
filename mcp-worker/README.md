@@ -56,20 +56,23 @@ curl -X POST https://aether-mcp.campiper84.workers.dev/compare \
 | `format` | `json` | `json` · `card` (SVG) · `overlay` (HTML per model) |
 | `max_models` | `4` | Fan-out cap; the hard ceiling is also 4 |
 
-### The colour scale has four states, not three
+### The three-colour scale
 
 | State | Colour | Meaning |
 |---|---|---|
 | `verified` | green | A supported claim maps to this sentence |
-| `unsupported` | red | The tribunal could not support this sentence |
-| `unassessed` | **grey** | The tribunal never assessed it — **this is not a pass** |
+| `unverified` | **yellow** | An unverified premise — the tribunal did not support it. **Not a pass.** |
+| `unsupported` | red | A hallucination — the tribunal actively refuted it |
 
-Grey is the **default**, and it exists because most sentences in a real answer are
-never individually assessed. Colouring them green would turn silence into a
-verification claim, which is precisely the failure Aether exists to catch. Claim→
-sentence mapping is a declared heuristic (normalized containment, then token overlap
-at ≥ 0.5); every mapped sentence carries `matchMethod` and `matchConfidence`, and any
-claim that maps nowhere is returned in `unmappedClaims` rather than dropped.
+**Yellow is the default, and it is load-bearing.** Most sentences in a real answer are
+never individually supported by the tribunal, and those are unverified premises.
+Rendering them green would turn silence into a verification claim, which is precisely
+the failure Aether exists to catch — so a sentence is only ever green because a
+supported claim actually maps to it.
+
+Claim→sentence mapping is a declared heuristic (normalized containment, then token
+overlap at ≥ 0.5); every mapped sentence carries `matchMethod` and `matchConfidence`,
+and any claim that maps nowhere is returned in `unmappedClaims` rather than dropped.
 
 `reliability` is the tribunal's **own** trust score, passed through untouched — not a
 composite invented here. A model whose verification carried no score reports

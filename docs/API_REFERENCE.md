@@ -90,10 +90,25 @@ curl -X POST https://aether.sf2x.com/api/functions/verifyResponse \
 
 ### 2. Batch Verify
 
-> ⚠️ **NOT DEPLOYED (live-probed 2026-08-09).** This endpoint returns
+> ⚠️ **NOT DEPLOYED (live-probed 2026-08-09).** Returns
 > `404 {"message":"Backend function 'batchVerify' not found or not deployed"}`.
-> The specification below is accurate as a design, but the examples will fail until
-> the function is deployed on the Base44 app.
+> Deployment is intended — see the cost guard below, which should land **with** it.
+>
+> 💸 **COST GUARD REQUIRED BEFORE DEPLOYING.** One `batchVerify` call runs the full
+> tribunal **once per text**, up to 50 times. The rate limits in this document are
+> counted **per request**, so as specified this endpoint is a 50× denial-of-wallet
+> multiplier: a Free-tier caller nominally limited to 100 requests/month could trigger
+> **5,000 tribunal runs** — 50× the intended spend — without exceeding their quota.
+>
+> Deploy with at least one of:
+> 1. **Meter per text, not per request** — charge `len(texts)` against the caller's
+>    quota. This is the real fix; it makes the multiplier impossible.
+> 2. **Cap batch size by tier** — e.g. Free 5, Starter 20, Pro/Enterprise 50.
+> 3. **Reject the batch** when `len(texts)` exceeds the caller's remaining quota,
+>    rather than partially running it and billing for the rest.
+>
+> `/webhookVerify` does **not** carry this risk: it is one tribunal run per call, the
+> same cost as `/verifyResponse`.
 
 **POST** `/batchVerify`
 
@@ -168,10 +183,16 @@ print(f"Average trust score: {data['summary']['average_trust_score']}/100")
 
 ### 3. Webhook Verification
 
-> ⚠️ **NOT DEPLOYED (live-probed 2026-08-09).** This endpoint returns
+> ⚠️ **NOT DEPLOYED (live-probed 2026-08-09).** Returns
 > `404 {"message":"Backend function 'webhookVerify' not found or not deployed"}`.
-> The specification below is accurate as a design, but the examples will fail until
-> the function is deployed on the Base44 app.
+> Deployment is intended, and this one is cost-safe: **one tribunal run per call**, the
+> same spend as `/verifyResponse`, with no batching multiplier.
+>
+> One security note for whoever implements it: `webhook_url` is caller-supplied and is
+> therefore an SSRF vector. It must be validated before the outbound POST — reject
+> non-`http(s)` schemes and localhost / private / link-local addresses (including
+> `169.254.169.254`, the cloud metadata endpoint). The MCP worker already does exactly
+> this in `mcp-worker/src/ssrf.js`; reuse that logic rather than writing it twice.
 
 **POST** `/webhookVerify`
 

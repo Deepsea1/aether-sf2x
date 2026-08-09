@@ -7,10 +7,10 @@
  * whatever already has a rasterizer. `satori`/`puppeteer-core` would both mean new
  * dependencies and, in the Worker case, a runtime that cannot host them.
  *
- * HONESTY IN THE PICTURE. The legend always names all three states including grey
- * "not assessed", and the footer states the grey caveat outright. A card that showed
- * only green and red would imply the tribunal examined every sentence, which is the
- * one thing this artifact must never imply. Models that produced no score are drawn
+ * HONESTY IN THE PICTURE. The legend always names all three states including YELLOW
+ * "unverified premise", and the footer states that caveat outright. A card that showed
+ * only green and red would imply the tribunal supported or refuted every sentence,
+ * which is the one thing this artifact must never imply. Models that produced no score are drawn
  * in their own row style with the reason, not omitted — omitting them would quietly
  * flatter the comparison.
  */
@@ -72,11 +72,12 @@ export function renderDiagnosticCard(matrix, { width = 1200, title = 'Aether Mul
     `<text x="${pad}" y="124" fill="${ACCENT}" font-size="17" font-style="italic">“${esc(clip(matrix?.prompt, 108))}”</text>`,
   );
 
-  // Legend — always all three states, grey included.
+  // Legend — always all three states. Yellow is never omitted: it is the colour
+  // that keeps the card from implying the tribunal checked every sentence.
   const legend = [
     ['Verified', STATE_COLORS.verified],
-    ['Unsupported', STATE_COLORS.unsupported],
-    ['Not assessed', STATE_COLORS.unassessed],
+    ['Unverified premise', STATE_COLORS.unverified],
+    ['Hallucination', STATE_COLORS.unsupported],
   ];
   let lx = pad;
   for (const [label, color] of legend) {
@@ -88,8 +89,8 @@ export function renderDiagnosticCard(matrix, { width = 1200, title = 'Aether Mul
   // Rows
   rows.forEach((row, i) => {
     const y = headerH + i * rowH;
-    const counts = row.counts || { verified: 0, unsupported: 0, unassessed: 0 };
-    const total = counts.verified + counts.unsupported + counts.unassessed;
+    const counts = row.counts || { verified: 0, unverified: 0, unsupported: 0 };
+    const total = counts.verified + counts.unverified + counts.unsupported;
 
     parts.push(
       `<rect x="${pad}" y="${y}" width="${width - pad * 2}" height="${rowH - 12}" rx="10" fill="${PANEL_BG}"/>`,
@@ -115,7 +116,7 @@ export function renderDiagnosticCard(matrix, { width = 1200, title = 'Aether Mul
       parts.push(`<text x="${barX + 12}" y="${y + 36}" fill="${MUTED}" font-size="13">no sentences to map</text>`);
     } else {
       let bx = barX;
-      for (const state of ['verified', 'unsupported', 'unassessed']) {
+      for (const state of ['verified', 'unverified', 'unsupported']) {
         const w = (counts[state] / total) * barW;
         if (w <= 0) continue;
         parts.push(
@@ -124,7 +125,7 @@ export function renderDiagnosticCard(matrix, { width = 1200, title = 'Aether Mul
         bx += w;
       }
       parts.push(
-        `<text x="${barX}" y="${y + 58}" fill="${MUTED}" font-size="12">${counts.verified} verified · ${counts.unsupported} unsupported · ${counts.unassessed} not assessed</text>`,
+        `<text x="${barX}" y="${y + 58}" fill="${MUTED}" font-size="12">${counts.verified} verified · ${counts.unverified} unverified · ${counts.unsupported} hallucination</text>`,
       );
     }
 
@@ -146,7 +147,7 @@ export function renderDiagnosticCard(matrix, { width = 1200, title = 'Aether Mul
   // Footer — the caveat is part of the artifact, not a nicety.
   const fy = headerH + rows.length * rowH + 22;
   parts.push(
-    `<text x="${pad}" y="${fy}" fill="${MUTED}" font-size="13">Grey = the tribunal did not assess that sentence. It is not a pass.</text>`,
+    `<text x="${pad}" y="${fy}" fill="${MUTED}" font-size="13">Yellow = an unverified premise the tribunal did not support. It is not a pass.</text>`,
   );
   const verdictLine = matrix?.winner
     ? `Highest reliability: ${matrix.winner}`
@@ -177,8 +178,8 @@ export function renderOverlayHtml(row) {
   const spans = sentences.map((s) => {
     const tip = s.notes
       ? `${s.state} — ${s.notes}`
-      : s.state === 'unassessed'
-        ? 'not assessed by the tribunal'
+      : s.state === 'unverified'
+        ? 'an unverified premise — the tribunal did not support this'
         : s.state;
     return (
       `<span class="aether-s" data-state="${esc(s.state)}" data-match="${esc(s.matchMethod)}" ` +

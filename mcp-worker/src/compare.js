@@ -13,12 +13,13 @@
  * the live warrantApi or a fixture.
  *
  * ── THE HONESTY PROBLEM THIS FILE IS BUILT AROUND ──────────────────────────────
- * The launch audit specifies a three-colour overlay: green = verified, yellow =
- * unverified premise, red = hallucination. That palette has no colour for the most
- * common case — a sentence the tribunal simply never assessed. Painting those green
- * would turn silence into a verification claim, which is the exact failure Aether
- * exists to catch. So there is a FOURTH state, `unassessed` (grey), and it is the
- * DEFAULT. A sentence is only ever green because a supported claim maps to it.
+ * The overlay uses the launch audit's three colours: green = verified, YELLOW =
+ * unverified premise, red = hallucination. Yellow is the load-bearing one and it is
+ * the DEFAULT: most sentences in a real answer are never individually supported by
+ * the tribunal, and those are unverified premises — not passes. A sentence is only
+ * ever green because a supported claim actually maps to it. Showing an unsupported
+ * sentence as green would turn silence into a verification claim, which is the exact
+ * failure Aether exists to catch.
  *
  * Claim→sentence mapping is a declared HEURISTIC, not ground truth: the tribunal
  * returns claims that paraphrase the answer rather than quote it, so matching uses
@@ -31,18 +32,26 @@
 /** Token overlap (Jaccard) at or above this maps a claim to a sentence. Declared, tunable. */
 export const OVERLAP_THRESHOLD = 0.5;
 
-/** Sentence verdict states. `unassessed` is the default — silence is not a pass. */
+/**
+ * Sentence verdict states — the audit's three-colour scale.
+ * `unverified` is the DEFAULT: a sentence the tribunal never supported is an
+ * unverified premise, not a passing one.
+ */
 export const SENTENCE_STATES = Object.freeze({
   VERIFIED: 'verified',
+  UNVERIFIED: 'unverified',
   UNSUPPORTED: 'unsupported',
-  UNASSESSED: 'unassessed',
 });
 
-/** Colours for the overlay. Grey is deliberate: it is not a soft green. */
+/**
+ * Green = verified · Yellow = unverified premise · Red = hallucination.
+ * Yellow is load-bearing: it is the honest colour for "the tribunal did not
+ * support this", which is most sentences. It must never be shown as green.
+ */
 export const STATE_COLORS = Object.freeze({
   verified: '#2eb872',
+  unverified: '#f4a72c',
   unsupported: '#d7263d',
-  unassessed: '#8a8f98',
 });
 
 const STOP_WORDS = new Set([
@@ -102,10 +111,10 @@ export function splitSentences(text) {
 /**
  * classifySentences — map the tribunal's claims onto the answer's sentences.
  *
- * Returns one entry per sentence, defaulting to `unassessed`. A sentence becomes
- * `verified` or `unsupported` only when a claim maps to it; when several claims map
- * to the same sentence, an unsupported claim WINS — the worst finding on a sentence
- * is the honest one to surface.
+ * Returns one entry per sentence, defaulting to `unverified` (yellow). A sentence
+ * becomes `verified` or `unsupported` only when a claim maps to it; when several
+ * claims map to the same sentence, an unsupported claim WINS — the worst finding on a
+ * sentence is the honest one to surface.
  */
 export function classifySentences(answerText, claims = []) {
   const sentences = splitSentences(answerText);
@@ -120,8 +129,8 @@ export function classifySentences(answerText, claims = []) {
 
   const entries = sentences.map((sentence) => ({
     sentence,
-    state: SENTENCE_STATES.UNASSESSED,
-    color: STATE_COLORS.unassessed,
+    state: SENTENCE_STATES.UNVERIFIED,
+    color: STATE_COLORS.unverified,
     claim: null,
     notes: '',
     matchConfidence: 0,
@@ -192,7 +201,7 @@ export function classifySentences(answerText, claims = []) {
 
 /** Count sentences by state. */
 export function stateCounts(sentenceEntries) {
-  const counts = { verified: 0, unsupported: 0, unassessed: 0 };
+  const counts = { verified: 0, unverified: 0, unsupported: 0 };
   for (const e of sentenceEntries) counts[e.state] += 1;
   return counts;
 }
@@ -216,7 +225,7 @@ export function buildModelRow({ model, answer, verification, error = null }) {
       reliabilityBasis: 'model or verification call failed',
       verdict: null,
       sentences: [],
-      counts: { verified: 0, unsupported: 0, unassessed: 0 },
+      counts: { verified: 0, unverified: 0, unsupported: 0 },
       unmappedClaims: [],
       warrantUrl: null,
     };
@@ -283,10 +292,10 @@ export function buildDiagnosticMatrix({ prompt, rows, generatedAt = null }) {
     (acc, r) => {
       acc.verified += r.counts.verified;
       acc.unsupported += r.counts.unsupported;
-      acc.unassessed += r.counts.unassessed;
+      acc.unverified += r.counts.unverified;
       return acc;
     },
-    { verified: 0, unsupported: 0, unassessed: 0 },
+    { verified: 0, unverified: 0, unsupported: 0 },
   );
 
   return {
@@ -303,7 +312,7 @@ export function buildDiagnosticMatrix({ prompt, rows, generatedAt = null }) {
     totals,
     // Stated so a reader is never left to assume the overlay is exhaustive.
     caveats: [
-      'A grey (unassessed) sentence was not evaluated by the tribunal. It is not a pass.',
+      'A yellow (unverified) sentence was not supported by the tribunal. It is an unverified premise, not a pass.',
       'Claim-to-sentence mapping is a heuristic; each mapped sentence carries its matchConfidence and matchMethod.',
       'Reliability is the tribunal\'s own trust score, not a score computed here.',
     ],

@@ -3,10 +3,10 @@
  *
  * Run: node --test src/compare.test.js   (from mcp-worker/)
  *
- * The load-bearing property is the one the audit's own colour palette gets wrong: a
- * sentence the tribunal never assessed must stay GREY. If silence can render as
- * green, the artifact fabricates verification, which is the exact failure the product
- * exists to catch. Most of these tests defend that.
+ * The load-bearing property: a sentence the tribunal never supported must stay YELLOW
+ * — the audit's "unverified premise". If silence can render as green, the artifact
+ * fabricates verification, which is the exact failure the product exists to catch.
+ * Most of these tests defend that.
  */
 
 import { test, describe } from 'node:test';
@@ -66,19 +66,19 @@ describe('splitSentences', () => {
   });
 });
 
-describe('classifySentences — silence stays grey', () => {
-  test('an unmatched sentence defaults to unassessed, never verified', () => {
+describe('classifySentences — silence stays yellow', () => {
+  test('an unmatched sentence defaults to unverified (yellow), never verified', () => {
     const { sentences } = classifySentences(ANSWER, CLAIMS);
     const third = sentences[2];
-    assert.equal(third.state, SENTENCE_STATES.UNASSESSED);
-    assert.equal(third.color, STATE_COLORS.unassessed);
+    assert.equal(third.state, SENTENCE_STATES.UNVERIFIED);
+    assert.equal(third.color, STATE_COLORS.unverified);
     assert.equal(third.matchMethod, 'none');
   });
 
-  test('with NO claims at all, every sentence is unassessed', () => {
+  test('with NO claims at all, every sentence is unverified', () => {
     const { sentences } = classifySentences(ANSWER, []);
     assert.equal(sentences.length, 3);
-    assert.ok(sentences.every((s) => s.state === SENTENCE_STATES.UNASSESSED));
+    assert.ok(sentences.every((s) => s.state === SENTENCE_STATES.UNVERIFIED));
     assert.equal(stateCounts(sentences).verified, 0);
   });
 
@@ -97,7 +97,7 @@ describe('classifySentences — silence stays grey', () => {
 
   test('a claim with no stated support colours nothing', () => {
     const { sentences } = classifySentences(ANSWER, [{ claim: 'Vacation accrues monthly.' }]);
-    assert.ok(sentences.every((s) => s.state === SENTENCE_STATES.UNASSESSED));
+    assert.ok(sentences.every((s) => s.state === SENTENCE_STATES.UNVERIFIED));
   });
 
   test('an unsupported finding is not overwritten by a later supported one', () => {
@@ -129,7 +129,7 @@ describe('classifySentences — silence stays grey', () => {
     const { sentences } = classifySentences('The sky is blue today.', [
       { claim: 'Quarterly revenue rose by twelve percent.', supported: false },
     ]);
-    assert.equal(sentences[0].state, SENTENCE_STATES.UNASSESSED);
+    assert.equal(sentences[0].state, SENTENCE_STATES.UNVERIFIED);
   });
 });
 
@@ -156,7 +156,7 @@ describe('buildModelRow', () => {
 
   test('counts the sentence states', () => {
     const row = buildModelRow({ model: 'gpt-4o', answer: ANSWER, verification });
-    assert.deepEqual(row.counts, { verified: 1, unsupported: 1, unassessed: 1 });
+    assert.deepEqual(row.counts, { verified: 1, unverified: 1, unsupported: 1 });
   });
 
   test('an errored model is a row, not a silent omission', () => {
@@ -217,7 +217,7 @@ describe('buildDiagnosticMatrix', () => {
     assert.deepEqual(tie.tied.sort(), ['x', 'y']);
   });
 
-  test('always carries the grey caveat', () => {
+  test('always carries the yellow caveat', () => {
     assert.ok(matrix.caveats.some((c) => /not a pass/i.test(c)));
   });
 });
@@ -297,9 +297,16 @@ describe('renderDiagnosticCard', () => {
     assert.match(svg, /&amp; more/);
   });
 
-  test('always shows the Not assessed legend entry and the grey caveat', () => {
-    assert.match(svg, /Not assessed/);
+  test('always shows the Unverified premise legend entry and the caveat', () => {
+    assert.match(svg, /Unverified premise/);
     assert.match(svg, /not a pass/i);
+  });
+
+  test('the legend has exactly the three audit colours, no duplicates', () => {
+    for (const label of ['Verified', 'Unverified premise', 'Hallucination']) {
+      const hits = svg.split(`>${label}<`).length - 1;
+      assert.equal(hits, 1, `${label} should appear exactly once in the legend`);
+    }
   });
 
   test('renders an errored model as unavailable rather than omitting it', () => {
@@ -324,11 +331,11 @@ describe('renderOverlayHtml', () => {
   test('marks every sentence with its state', () => {
     assert.match(html, /data-state="unsupported"/);
     assert.match(html, /data-state="verified"/);
-    assert.match(html, /data-state="unassessed"/);
+    assert.match(html, /data-state="unverified"/);
   });
 
-  test('an unassessed sentence says it was not assessed, not that it passed', () => {
-    assert.match(html, /not assessed by the tribunal/);
+  test('an unverified sentence says so, rather than implying it passed', () => {
+    assert.match(html, /unverified premise/);
   });
 
   test('escapes the answer text', () => {
