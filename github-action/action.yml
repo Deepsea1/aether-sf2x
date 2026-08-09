@@ -7,7 +7,11 @@ branding:
 
 inputs:
   api-key:
-    description: 'Aether API key'
+    description: 'Aether API key. The API requires one — without it the request is rejected with 401.'
+    required: false
+    default: ''
+  api-url:
+    description: 'Override the Aether verifyResponse endpoint. Defaults to the live app-domain route.'
     required: false
     default: ''
   text:
@@ -32,4 +36,7 @@ outputs:
 
 runs:
   using: 'node20'
-  main: 'dist/index.js'
+  # Points at the source directly: the Action has no dependencies, so there is no
+  # bundle to build. This previously read `dist/index.js`, which does not exist in
+  # the repository — the Action could not load at all.
+  main: 'index.mjs'

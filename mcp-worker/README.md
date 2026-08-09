@@ -24,6 +24,76 @@ Both paths funnel into the same three tools and the same upstream engine.
   `get_warrant` can retrieve prior decisions without a second tribunal run.
 - The attestation key never leaves Base44; the Worker never signs anything itself.
 
+It also serves two non-MCP HTTP endpoints, both behind the same static bearer:
+
+- **`POST /alerts/dispatch`** — real-time hallucination alerting to Slack / Microsoft
+  Teams. Evaluates a trigger policy against a verification and, only if it fires,
+  formats and delivers a card. Full reference: [`docs/INTEGRATION_GUIDE.md`](../docs/INTEGRATION_GUIDE.md).
+- **`POST /compare`** — the multi-model diagnostic matrix (below).
+
+`GET /health` reports both capabilities honestly, including which comparison models
+have a key configured and which are dark.
+
+## `POST /compare` — multi-model diagnostic matrix
+
+Sends one prompt to several frontier models, runs **every** answer through the Aether
+tribunal, and returns a sentence-by-sentence map of where each model held up.
+
+```bash
+curl -X POST https://aether-mcp.campiper84.workers.dev/compare \
+  -H "Authorization: Bearer $AETHER_MCP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "prompt": "How many vacation days do first-year employees get?",
+        "models": ["gpt-4o", "claude-sonnet-4.5"],
+        "domain": "HR", "format": "json" }'
+```
+
+| Field | Default | Notes |
+|---|---|---|
+| `prompt` | — | Required, ≤ 8000 chars |
+| `models` | all registered | Only models with a configured key actually run |
+| `domain` | `General` | Passed to the tribunal |
+| `format` | `json` | `json` · `card` (SVG) · `overlay` (HTML per model) |
+| `max_models` | `4` | Fan-out cap; the hard ceiling is also 4 |
+
+### The three-colour scale
+
+| State | Colour | Meaning |
+|---|---|---|
+| `verified` | green | A supported claim maps to this sentence |
+| `unverified` | **yellow** | An unverified premise — the tribunal did not support it. **Not a pass.** |
+| `unsupported` | red | A hallucination — the tribunal actively refuted it |
+
+**Yellow is the default, and it is load-bearing.** Most sentences in a real answer are
+never individually supported by the tribunal, and those are unverified premises.
+Rendering them green would turn silence into a verification claim, which is precisely
+the failure Aether exists to catch — so a sentence is only ever green because a
+supported claim actually maps to it.
+
+Claim→sentence mapping is a declared heuristic (normalized containment, then token
+overlap at ≥ 0.5); every mapped sentence carries `matchMethod` and `matchConfidence`,
+and any claim that maps nowhere is returned in `unmappedClaims` rather than dropped.
+
+`reliability` is the tribunal's **own** trust score, passed through untouched — not a
+composite invented here. A model whose verification carried no score reports
+`reliability: null` with `reliabilityBasis` explaining why, and a tie in the ranking is
+reported as a tie rather than broken arbitrarily.
+
+### Cost
+
+This is the only endpoint that calls paid third-party vendors, so it is deliberately
+conservative:
+
+- A model runs **only** when its own key is set — `OPENAI_API_KEY`,
+  `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `GROQ_API_KEY` (Llama via Groq's
+  OpenAI-compatible endpoint). With none configured the route returns **503 and spends
+  nothing**.
+- Output is capped at 600 tokens per vendor call, each with a 30s timeout and **no
+  retries** — a retry loop across four vendors is an easy way to multiply a bill.
+- The same per-caller and per-IP rate-limit counters as the MCP tools apply.
+- Anything not run is listed in `skipped` **with the reason**, including models dropped
+  by the `max_models` cap. A comparison never quietly shrinks.
+
 ## Architecture (files)
 
 `worker.js` is the conductor only; the logic is split into modules:
@@ -36,7 +106,13 @@ Both paths funnel into the same three tools and the same upstream engine.
 | `src/authorize.js` | The `/authorize` approval page, gated by a shared secret. |
 | `src/auth.js` | Static-bearer validation (fail-closed) + constant-time compare. |
 | `src/ratelimit.js` | Per-identity + per-IP KV rate limiter (denial-of-wallet guard). |
-| `src/ssrf.js` | Source-URL SSRF guard. |
+| `src/ssrf.js` | Source-URL SSRF guard (also guards customer-supplied alert webhooks). |
+| `src/alerts.js` | Pure alerting layer: normalize any verification shape, evaluate the trigger policy, build Slack Block Kit / Teams MessageCard payloads. `dispatchAlert` is the only I/O. |
+| `src/alertsRoute.js` | `POST /alerts/dispatch` — auth, rate limit, input caps, then delegate. |
+| `src/compare.js` | Pure diagnostic-matrix engine: sentence segmentation, claim→sentence mapping, per-model rows, ranking. |
+| `src/compareCard.js` | SVG diagnostic card + HTML sentence overlay (no dependencies, Worker-safe). |
+| `src/modelAdapters.js` | One fetch per vendor (OpenAI / Anthropic / Google / Groq), token- and time-capped, no retries. |
+| `src/compareRoute.js` | `POST /compare` — auth, rate limit, key gating, then delegate. |
 
 ## Deploy
 

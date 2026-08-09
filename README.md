@@ -26,7 +26,7 @@ The **red-team loop** is critical: 91/100 with it, 58/100 without.
 ## 🔌 API Quick Start
 
 ```bash
-curl -X POST https://api.base44.com/apps/6a6babb38b48187e5d4799c4/backend/functions/verifyResponse \
+curl -X POST https://aether.sf2x.com/api/functions/verifyResponse \
   -H "Content-Type: application/json" \
   -d '{"text": "According to Section 4.1, all employees get 15 vacation days."}'
 ```

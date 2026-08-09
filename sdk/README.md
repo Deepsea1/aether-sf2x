@@ -1,9 +1,33 @@
-# Aether Python SDK
+# Aether SDKs
+
+Two shipped clients, both in this directory:
+
+| File | Language | Requires |
+|---|---|---|
+| [`aether_sdk.py`](aether_sdk.py) | Python | `pip install requests` |
+| [`aether_sdk.js`](aether_sdk.js) | JavaScript / Node | Node 18+ (no dependencies) |
+
+> **These are real files as of 2026-08-09.** They previously existed only as code
+> blocks in this README under "Save this as…", while the top-level README advertised
+> "Python + JavaScript SDKs" — so the advertised SDKs were not actually shipped. Three
+> bugs were fixed in the process: auth is **`x-api-key`**, not `Authorization: Bearer`
+> (the API rejects Bearer with a 401); the base URL is the app domain (the old
+> `api.base44.com/apps/<id>/backend/functions` base 404s with an HTML page); and the
+> JS module now exports **both** `require('./aether_sdk')` and
+> `const { AetherClient } = require('./aether_sdk')`, the latter of which previously
+> resolved to `undefined`.
+>
+> `batch_verify` / `batchVerify` and `verify_webhook` / `verifyWebhook` raise a clear
+> `NotDeployedError` — those two backend functions are **not currently deployed**
+> (see `docs/API_REFERENCE.md` → Endpoint status).
 
 ## Installation
 
 ```bash
+# Python
 pip install requests
+
+# JavaScript — nothing to install, Node 18+ has fetch built in
 ```
 
 ## Quick Start
@@ -33,9 +57,14 @@ aether.verify_webhook(
 )
 ```
 
-## SDK Implementation
+## Python source
 
-Save this as `aether_sdk.py`:
+Shipped as [`aether_sdk.py`](aether_sdk.py) — the listing below is that file, kept
+inline for reference. Import it directly rather than copying:
+
+```python
+from aether_sdk import AetherClient
+```
 
 ```python
 import requests
@@ -45,7 +74,7 @@ from typing import List, Dict, Optional
 class AetherClient:
     """Aether by SF2X — AI Trust Verification Client"""
     
-    BASE_URL = "https://api.base44.com/apps/6a6babb38b48187e5d4799c4/backend/functions"
+    BASE_URL = "https://aether.sf2x.com/api/functions"
     
     def __init__(self, api_key: str = ""):
         self.api_key = api_key
@@ -112,12 +141,14 @@ if __name__ == "__main__":
     print(f"Score: {result['trust_score']}/100 — {result['verdict']}")
 ```
 
-## JavaScript/Node.js SDK
+## JavaScript source
+
+Shipped as [`aether_sdk.js`](aether_sdk.js), tested by `sdk/aether_sdk.test.mjs`.
 
 ```javascript
 class AetherClient {
   constructor(apiKey = "") {
-    this.baseUrl = "https://api.base44.com/apps/6a6babb38b48187e5d4799c4/backend/functions";
+    this.baseUrl = "https://aether.sf2x.com/api/functions";
     this.headers = { "Content-Type": "application/json" };
     if (apiKey) this.headers["Authorization"] = `Bearer ${apiKey}`;
   }
