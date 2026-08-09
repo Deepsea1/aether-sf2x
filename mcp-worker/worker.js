@@ -26,6 +26,8 @@ import { runMcp, TOOLS } from './src/mcp-core.js';
 import { validStaticBearer, staticIdentity } from './src/auth.js';
 import { handleAlertsDispatch } from './src/alertsRoute.js';
 import { CHANNEL_BUILDERS } from './src/alerts.js';
+import { handleCompare } from './src/compareRoute.js';
+import { MODEL_REGISTRY, availableModels } from './src/compare.js';
 
 // The OAuthProvider is a pure config object; build it once per isolate, lazily, so
 // it can read MCP_PUBLIC_URL from env.
@@ -53,6 +55,9 @@ export default {
         warrant_api_configured: !!(env.AETHER_WARRANT_API_URL || '').trim(),
         // Non-MCP capabilities served by this worker.
         alert_channels: Object.keys(CHANNEL_BUILDERS),
+        // Honest capability report: which comparison models have a key configured
+        // right now, and which are dark. Never claims a model it cannot run.
+        compare_models: availableModels(Object.keys(MODEL_REGISTRY), env),
       });
     }
 
@@ -73,6 +78,13 @@ export default {
     // re-checks the customer-supplied webhook URL against the SSRF guard.
     if (req.method === 'POST' && p === '/alerts/dispatch') {
       return handleAlertsDispatch(req, env);
+    }
+
+    // Multi-model diagnostic matrix. Static bearer only. Fans out to PAID vendors, so
+    // it runs a model only when that model's own key is configured — with none set it
+    // returns 503 and spends nothing.
+    if (req.method === 'POST' && p === '/compare') {
+      return handleCompare(req, env);
     }
 
     // A client reconfigured to `/mcp` may still present the static bearer; honor it
