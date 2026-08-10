@@ -1,0 +1,4 @@
+{
+  "name": "batchVerify",
+  "entry": "entry.ts"
+}

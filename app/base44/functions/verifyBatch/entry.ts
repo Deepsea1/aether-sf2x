@@ -1,10 +1,12 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { resolveApiKey, checkQuota, recordUsage, CREDIT_COSTS } from '../../shared/apiAuth.js';
+import { resolveApiKey, checkQuota, recordUsage, planBatchCharge, CREDIT_COSTS } from '../../shared/apiAuth.js';
 
 // verifyBatch — retroactive audit of existing AI transcripts/logs. Accepts up
 // to 10 texts (items[] or newline-separated csv) and runs the fast verification
 // on each in parallel, returning a per-item verdict + trust score + corrections.
-// Larger batches should be chunked client-side.
+// Larger batches are rejected with 400 (no silent truncation) — chunk them
+// client-side. The whole batch must also fit the caller's remaining credits
+// before any LLM call runs (MASTER_PLAN v5 §7.3).
 
 const SCHEMA = {
   type: 'object',
@@ -28,14 +30,23 @@ export default async function (req) {
     if (!items.length && body.csv) {
       items = String(body.csv).split(/\n+/).map((l) => l.trim()).filter(Boolean).map((t) => ({ text: t }));
     }
-    items = items.slice(0, 10).map((i) => ({ text: String(i.text || '').trim(), domain: String(i.domain || 'General') })).filter((i) => i.text);
+    items = items.map((i) => ({ text: String(i.text || '').trim(), domain: String(i.domain || 'General') })).filter((i) => i.text);
     if (!items.length) return Response.json({ error: 'Provide items[] or csv (up to 10)' }, { status: 400 });
+    // Explicit reject, not silent truncation: trimming a batch to fit and billing
+    // the remainder is how customers get surprise results (MASTER_PLAN v5 §7.3).
+    if (items.length > 10) return Response.json({ error: 'Max 10 items per batch' }, { status: 400 });
 
     const auth = await resolveApiKey(svc, req);
     if (!auth.ok) return auth.response;
     const apiKey = auth.apiKey;
     const quota = await checkQuota(svc, apiKey, 'verifyResponse');
     if (!quota.allowed) return Response.json({ error: 'Monthly verification quota exceeded', plan: quota.plan, limit: quota.limit, remaining: 0 }, { status: 429 });
+    // Whole-batch headroom (MASTER_PLAN v5 §7.3): this endpoint bills per text,
+    // so the whole batch must fit the remaining credits BEFORE any tribunal call
+    // runs — 1 remaining credit no longer admits a full batch. A rejected batch
+    // runs nothing and charges nothing.
+    const charge = planBatchCharge({ plan: quota.plan, remaining: quota.remaining, endpoint: 'verifyResponse', itemCount: items.length });
+    if (!charge.allowed) return Response.json({ error: charge.reason, plan: quota.plan, limit: quota.limit, remaining: quota.remaining }, { status: charge.status });
 
     const results = await Promise.all(items.map(async (it) => {
       try {

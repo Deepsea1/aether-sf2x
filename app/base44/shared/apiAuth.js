@@ -93,6 +93,56 @@ export async function checkQuota(svc, apiKey, endpoint) {
   return { allowed: remaining > 0, remaining, limit, used, plan, month };
 }
 
+// Per-plan batch-size ceilings for batch endpoints, keyed off the PLAN_QUOTAS
+// plan names above (every plan PLAN_QUOTAS defines gets a cap here). A monthly
+// quota alone does not bound a single request's cost — one batch call fans out
+// N LLM runs — so every plan also carries a max batch size. Unknown plans fail
+// closed to the free cap (mirrors mcp-worker/src/batchQuota.js resolveTier: a
+// typo in a plan name must never mint a bigger batch).
+export const BATCH_MAX_BY_PLAN = {
+  free: 3,
+  starter: 5,
+  pro: 10,
+  enterprise: 10,
+  byok: 10,
+  scale: 10,
+  // legacy fallbacks (same names as PLAN_QUOTAS)
+  premium: 10,
+  'api-access': 10,
+  'api-access-pro': 10,
+};
+
+// planBatchCharge — decide whether a WHOLE batch may run and what it costs,
+// BEFORE anything runs. Pure (no DB): pass the plan + remaining that checkQuota
+// resolved. The rule (MASTER_PLAN v5 §7.3, ported from
+// mcp-worker/src/batchQuota.js planBatch): a batch bills itemCount x the
+// per-item credit cost, and a batch that does not fit the remaining credits is
+// rejected whole — never trimmed, never run-and-overshot. A rejected batch runs
+// nothing and charges nothing. Callers may pass maxBatchByPlan to override the
+// BATCH_MAX_BY_PLAN defaults (e.g. batchVerify's documented 50-text contract).
+export function planBatchCharge({ plan, remaining, endpoint, itemCount, maxBatchByPlan } = {}) {
+  const caps = maxBatchByPlan || BATCH_MAX_BY_PLAN;
+  const planKey = String(plan || '').trim().toLowerCase();
+  // Fail closed: an unknown/missing plan is capped as free, not as the biggest.
+  const planName = Object.prototype.hasOwnProperty.call(caps, planKey) ? planKey : 'free';
+  const cap = Number.isFinite(Number(caps[planName])) ? Number(caps[planName]) : 0;
+  const count = Number.isFinite(Number(itemCount)) ? Math.floor(Number(itemCount)) : 0;
+  const cost = count * (CREDIT_COSTS[endpoint] ?? 1); // same per-call fallback as checkQuota
+  if (count <= 0) {
+    return { allowed: false, status: 400, reason: 'Batch must contain at least one item', cost: 0 };
+  }
+  if (count > cap) {
+    return { allowed: false, status: 400, reason: `The ${planName} plan allows at most ${cap} items per batch (received ${count}). Split the batch or upgrade the plan.`, cost };
+  }
+  // Infinity is a real value here (zero-cost endpoints report remaining=Infinity)
+  // and compares correctly; anything non-numeric fails closed to 0.
+  const left = remaining === Infinity ? Infinity : (Number.isFinite(Number(remaining)) ? Math.max(0, Number(remaining)) : 0);
+  if (cost > left) {
+    return { allowed: false, status: 429, reason: `This batch needs ${cost} credits but only ${left} remain in the monthly quota for the ${planName} plan. The batch was not run and nothing was charged.`, cost };
+  }
+  return { allowed: true, status: 200, reason: null, cost };
+}
+
 // Record a successful metered call. Called AFTER the endpoint work succeeds so
 // failed calls are not charged. Zero-credit calls (gateApi) are not recorded.
 export async function recordUsage(svc, apiKey, endpoint, credits, metadata = {}) {
