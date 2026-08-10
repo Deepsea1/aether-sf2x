@@ -1,5 +1,5 @@
 name: 'Aether Hallucination Guard'
-description: 'Verify AI responses in your CI/CD pipeline. Fails the build if hallucinations are detected.'
+description: 'Verify AI responses and PR claims in your CI/CD pipeline. Advisory by default; enforcing mode fails the build on blocked or review-required claims.'
 author: 'SF2X'
 branding:
   icon: 'shield'
@@ -17,22 +17,41 @@ inputs:
   text:
     description: 'Text to verify (or path to a file containing text)'
     required: true
+  mode:
+    description: >-
+      Gate mode. "advisory" (default) reports findings — annotations plus a
+      would-have-blocked summary — but NEVER fails the build. "enforcing" fails on
+      blocked claims and high-materiality review claims (or, against an older server
+      that sends no claim dispositions, on the legacy threshold rule). BREAKING
+      DEFAULT in v2: v1 blocked by default — to keep blocking, set mode: enforcing.
+    required: false
+    default: 'advisory'
   threshold:
-    description: 'Minimum trust score to pass (0-100)'
+    description: >-
+      Minimum trust score to pass (0-100). DEPRECATED: consulted only when the
+      server response carries no per-claim dispositions (older servers), and only
+      enforced in enforcing mode; ignored otherwise — no single score is the
+      decision.
     required: false
     default: '80'
   fail-on-contested:
-    description: 'Fail the build if verdict is "contested" (not just "rejected")'
+    description: >-
+      Fail the build if verdict is "contested" (not just "rejected"). Legacy
+      (no-dispositions) responses only, and only in enforcing mode.
     required: false
     default: 'false'
 
 outputs:
   trust-score:
-    description: 'Trust score of the verified text (0-100)'
+    description: 'Trust score of the verified text (0-100); 0 when the server sends dispositions instead'
   verdict:
-    description: 'Tribunal verdict (verified, contested, rejected)'
+    description: 'Tribunal verdict (verified, contested, rejected); "unknown" when the server sends dispositions instead'
   corrections:
     description: 'JSON array of corrections issued by the tribunal'
+  gate-decision:
+    description: "The server's own gate_decision (passed, warned, requires_review, blocked) when present; empty for legacy responses"
+  dispositions:
+    description: 'JSON array of per-claim dispositions ({disposition, materiality, category, file_path, diff_line, text}); empty for legacy responses'
 
 runs:
   using: 'node20'

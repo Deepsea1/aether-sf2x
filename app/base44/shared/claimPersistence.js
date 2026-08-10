@@ -216,3 +216,62 @@ export async function persistClaimsAndEvidence(svc, {
 
   return { claimIds, evidencePackIds };
 }
+
+// ---- Wedge evidence persistence (P3 Mission A, plan §5.4/§10) --------------
+// Persist one EvidencePack for a PR-wedge claim from its per-citation evidence
+// records (produced in githubPrVerify). Each source row carries the locator,
+// quote_present (deterministic 8+ word containment), and the applicability v1
+// assessment, so the pack is auditable without refetching. Fail open by
+// design: evidence bookkeeping must never fail the wedge — errors are logged
+// and swallowed, and the function never throws.
+export async function persistClaimEvidence(svc, { claimId, tenantId, claimText = '', citations = [] }) {
+  const cits = Array.isArray(citations) ? citations : [];
+  if (!claimId || !cits.length) return { evidencePackId: null };
+  try {
+    const sources = cits.map((c) => ({
+      url: c.url,
+      publisher: '',
+      author: '',
+      capture_time: c.fetched_at || new Date().toISOString(),
+      source_version: c.content_hash || null,
+      content_hash: c.content_hash || null,
+      locator: c.locator || { type: 'url', value: c.url },
+      quote_present: c.quote_present === true,
+      applicability: c.applicability || null,
+      authority_tier: mapTier(c.tier),
+      freshness_days: null,
+      freshness_status: 'unknown',
+      retraction_status: 'none',
+      quarantined: c.status === 'blocked' || c.status === 'error',
+      quarantine_reason: c.status === 'blocked' ? 'SSRF-blocked' : (c.status === 'error' ? 'fetch error' : null),
+    }));
+    const supportingExcerpts = cits
+      .filter((c) => c.quote_present === true)
+      .map((c) => ({ source_url: c.url, excerpt: c.excerpt || '(quote matched in fetched content)', match_score: 1 }));
+    const fetchedAny = cits.some((c) => c.fetched_ok === true);
+    const coverage = supportingExcerpts.length ? 'partial' : (fetchedAny ? 'sampled' : 'unverified');
+    const manifestHash = await sha256hex(JSON.stringify({
+      claim_id: claimId,
+      claim_text: String(claimText || '').slice(0, 2000),
+      sources: sources.map((s) => ({ url: s.url, hash: s.content_hash, quote_present: s.quote_present })),
+    }));
+    const ep = await svc.entities.EvidencePack.create({
+      claim_id: claimId,
+      sources,
+      supporting_excerpts: supportingExcerpts,
+      conflicting_excerpts: [],
+      source_authority_summary: summarizeAuthority(sources),
+      freshness_summary: summarizeFreshness(sources),
+      coverage,
+      limitations: ['Deterministic wedge grounding: quote containment + applicability v1 only — no model verification ran.'],
+      manifest_hash: manifestHash,
+      tenant_id: tenantId,
+      description: `Wedge evidence for claim ${claimId} · ${sources.length} citation(s) · ${supportingExcerpts.length} quote match(es)`.slice(0, 1000),
+    });
+    await svc.entities.Claim.update(claimId, { evidence_pack_id: ep.id, coverage_state: coverage }).catch(() => {});
+    return { evidencePackId: ep.id };
+  } catch (e) {
+    console.error('Wedge evidence persist failed:', e?.message || e);
+    return { evidencePackId: null };
+  }
+}

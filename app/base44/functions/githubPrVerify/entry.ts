@@ -5,6 +5,15 @@
 // the same PR, unchanged claims reuse their stored verdicts via the
 // VerdictReuse cache (MASTER_PLAN v5 §7.2 delta rule) instead of re-evaluating.
 //
+// P3 (Mission A): the wedge now grounds evidence and resolves deterministic
+// dispositions. Claims that cite http(s) URLs get each citation fetched through
+// attest.js's SSRF-guarded machinery (content hash, excerpt, quote_present,
+// applicability v1 — §5.4), every claim gets a disposition from the §8.1
+// resolver ladder, the gate honors policy.mode (advisory never blocks — §11.3),
+// and needs-review dispositions hand off to the Review pipeline (§12.5).
+// Evidence is input to the resolver, never a gate on the function — fetch
+// failures degrade a claim's disposition, they never crash the run.
+//
 // Accepts either:
 //   - { owner, repo, pull_number, head_sha } → fetches the diff from GitHub API
 //   - { owner, repo, head_sha, diff_text }  → caller provides the diff directly
@@ -21,6 +30,11 @@ import { buildLedgerEntry } from '../../shared/ledger.js';
 import { emitTelemetry, newTraceId } from '../../shared/telemetry.js';
 import { PIPELINE_VERSION, claimReuseKey, lookupVerdicts, storeVerdict, recordHit } from '../../shared/verdictReuse.js';
 import { jcsCanonicalize, sha256Hex } from '../../shared/canonicalSign.js';
+import { assertSafeSourceUrl, safeFetchValidated, tierForSource } from '../../shared/attest.js';
+import { assessApplicability, quotePresent, buildResolverInputs } from '../../shared/applicability.js';
+import { RESOLVER_VERSION, resolveClaim, resolveGate } from '../../shared/decisionResolver.js';
+import { persistClaimEvidence } from '../../shared/claimPersistence.js';
+import { createReviewsForGate } from '../../shared/reviews.js';
 
 const SYSTEM_DEFAULT_POLICY = parsePolicyYaml(`
 version: 1
@@ -179,6 +193,22 @@ export default async function(req) {
       claims.push(...titleClaims);
     }
 
+    // ---- §11.3 cost cap: max_claims_per_run — over-cap degrades the run to
+    // advisory and says exactly what was skipped. Never silent truncation.
+    const totalClaimsFound = claims.length;
+    const runNotes = [];
+    const maxClaimsPerRun = Number(policy.max_claims_per_run);
+    let runForcedAdvisory = false;
+    if (Number.isFinite(maxClaimsPerRun) && maxClaimsPerRun > 0 && claims.length > maxClaimsPerRun) {
+      claims.splice(maxClaimsPerRun);
+      runForcedAdvisory = true;
+      runNotes.push(`max_claims_per_run: ${totalClaimsFound} claims found, first ${maxClaimsPerRun} evaluated (${totalClaimsFound - maxClaimsPerRun} skipped) — gate degraded to advisory for this run`);
+    }
+    // Policy mode (§11.3 / policy v2 contract): the v2 parser sets mode itself
+    // ('advisory' when a v2 file omits it); absent mode — a v1 policy — keeps
+    // the file's current enforcing behavior. Over-cap forces advisory.
+    const advisoryMode = policy.mode === 'advisory' || runForcedAdvisory;
+
     if (!claims.length) {
       // No factual claims found — set a clean status.
       const statusState = 'success';
@@ -199,6 +229,8 @@ export default async function(req) {
         commit_status: statusState,
         claims_evaluated: 0,
         claims_reused: 0,
+        resolver_version: RESOLVER_VERSION,
+        advisory_mode: advisoryMode,
       });
     }
 
@@ -216,8 +248,10 @@ export default async function(req) {
     // exact re-run. policy.policy_hash is NOT used directly: computePolicyHash
     // folds in policy_id, which parsePolicyYaml defaults to a Date.now()-based
     // value — a timestamp that would silently poison every key. evaluatePolicy
-    // reads only default_action / rules / release_gate; version is folded in
-    // anyway so a semantic policy bump over-invalidates (the safe direction).
+    // reads default_action / rules / release_gate (+ materiality_rules once the
+    // v2 parser lands, and mode decides the gate posture), so those are all
+    // folded in; version is folded in anyway so a semantic policy bump
+    // over-invalidates (the safe direction).
     // Any cache failure degrades to full evaluation — the cache is an
     // accelerator, never a gate.
     let reuseKeys = [];
@@ -225,6 +259,8 @@ export default async function(req) {
     try {
       const reusePolicyHash = await sha256Hex(jcsCanonicalize({
         default_action: policy.default_action,
+        materiality_rules: policy.materiality_rules ?? null,
+        mode: policy.mode ?? null,
         release_gate: policy.release_gate,
         rules: policy.rules,
         version: policy.version,
@@ -256,6 +292,7 @@ export default async function(req) {
           policy_decision: cached.payload.policy_decision,
           policy_rule: cached.payload.policy_rule || null,
           policy_reason: cached.payload.policy_reason || null,
+          materiality: typeof cached.payload.materiality === 'string' ? cached.payload.materiality : materialityFromRisk(claim.risk_level),
           reused: true,
         };
       }
@@ -270,6 +307,10 @@ export default async function(req) {
         policy_decision: policyResult.action,
         policy_rule: policyResult.rule ? policyResult.rule.category : null,
         policy_reason: policyResult.reason || null,
+        // Materiality (§6.2): the v2 parser's evaluatePolicy applies floor
+        // rules and returns materiality; until then (v1 policies) it derives
+        // from the claim's deterministic risk level.
+        materiality: typeof policyResult.materiality === 'string' ? policyResult.materiality : materialityFromRisk(claim.risk_level),
         reused: false,
       };
     });
@@ -298,6 +339,7 @@ export default async function(req) {
               policy_decision: c.policy_decision,
               policy_rule: c.policy_rule,
               policy_reason: c.policy_reason,
+              materiality: c.materiality,
             },
             pipeline_version: PIPELINE_VERSION,
             model: EVAL_MODEL,
@@ -306,6 +348,77 @@ export default async function(req) {
         }
       }
     }
+
+    // ---- Evidence grounding (§5.4): fetch cited URLs, hash + quote-check ----
+    // For claims whose text cites http(s) URLs, fetch each citation through
+    // the SAME SSRF-guarded machinery the warrant pipeline uses, and record
+    // per citation: content hash, excerpt, fetch outcome, quote_present (8+
+    // word normalized containment — deterministic, no LLM), and the
+    // deterministic applicability v1 assessment. Fetches are capped per run
+    // with an explicit note — no silent truncation — and failures never crash
+    // the run: evidence is input to the resolver, not a gate on the function.
+    const maxEvidenceFetches = Number.isFinite(Number(policy.max_evidence_fetches)) && Number(policy.max_evidence_fetches) > 0
+      ? Number(policy.max_evidence_fetches)
+      : 10;
+    const snapshotCache = new Map();
+    let fetchBudget = maxEvidenceFetches;
+    let fetchesCapped = false;
+    for (const claim of evaluatedClaims) {
+      const urls = citedUrls(claim.text);
+      if (!urls.length) continue;
+      const citations = [];
+      for (const url of urls) {
+        if (!snapshotCache.has(url)) {
+          if (fetchBudget <= 0) { fetchesCapped = true; break; }
+          fetchBudget--;
+          snapshotCache.set(url, await snapshotCitation(url));
+        }
+        const snap = snapshotCache.get(url);
+        citations.push({
+          url,
+          tier: tierForSource(url).tier,
+          locator: { type: 'url', value: url },
+          fetched_at: snap.fetched_at,
+          fetched_ok: snap.fetched_ok,
+          status: snap.status,
+          content_hash: snap.content_hash,
+          content_length: snap.content_length,
+          excerpt: snap.excerpt,
+          http_date: snap.http_date,
+          quote_present: snap.fetched_ok ? quotePresent(claim.text, snap.content) : false,
+          applicability: assessApplicability({
+            claimText: claim.text,
+            snapshot: { url, fetchedOk: snap.fetched_ok, contentExcerpt: snap.content, contentHash: snap.content_hash, httpDate: snap.http_date },
+          }),
+        });
+      }
+      if (citations.length) claim.evidence = citations;
+    }
+    if (fetchesCapped) {
+      runNotes.push(`evidence_fetches_capped: citation fetches limited to ${maxEvidenceFetches} per run — remaining cited URLs were not fetched`);
+    }
+
+    // ---- §8.1 resolver: deterministic disposition per claim -----------------
+    // Inputs come from what the wedge actually knows: policy prohibition,
+    // Flash injection indicators, pack scope, the verdict pipeline's
+    // contradicted/unsupported statuses, and the evidence grounded above.
+    // verified_for_stated_use is unreachable in v1 — the wedge never fully
+    // verifies, so quote-backed claims cap at supported_with_limits and
+    // unverified claims are honestly 'unknown'.
+    for (const claim of evaluatedClaims) {
+      claim.disposition = resolveClaim(buildResolverInputs({
+        policyDecision: claim.policy_decision,
+        flashSignals: claim.flash_signals,
+        verdictStatus: claim.verdict_status,
+        outOfScope: isOutOfScopePath(policy, claim.file_path),
+        materiality: claim.materiality,
+        citations: claim.evidence || [],
+      }));
+    }
+    const dispositionCounts = evaluatedClaims.reduce((acc, c) => {
+      acc[c.disposition] = (acc[c.disposition] || 0) + 1;
+      return acc;
+    }, {});
 
     // ---- Persist Claim records ----
     const persistedClaims = [];
@@ -327,9 +440,20 @@ export default async function(req) {
           coverage_state: 'unverified',
           policy_decision: claim.policy_decision,
           tenant_id,
-          description: `Extracted from PR ${owner}/${repo}#${pull_number || 'n/a'} · ${claim.flash_state}`,
+          description: `Extracted from PR ${owner}/${repo}#${pull_number || 'n/a'} · ${claim.flash_state} · ${claim.disposition}`,
         });
         persistedClaims.push({ ...claim, id: rec.id });
+        // Persist the citation evidence (locator + applicability + quote) as an
+        // EvidencePack. persistClaimEvidence never throws by design; the catch
+        // is belt-and-suspenders so evidence bookkeeping can never fail the run.
+        if (claim.evidence && claim.evidence.length) {
+          await persistClaimEvidence(svc, {
+            claimId: rec.id,
+            tenantId: tenant_id,
+            claimText: claim.text,
+            citations: claim.evidence,
+          }).catch((e) => console.error('Evidence persist failed:', e?.message || e));
+        }
       } catch (e) {
         console.error('Claim persist failed:', e?.message || e);
         persistedClaims.push(claim);
@@ -360,11 +484,60 @@ export default async function(req) {
       statusDesc = `${evaluatedClaims.length} claim(s) scanned, no policy violations`;
     }
 
+    // ---- §8 resolver gate overlay + §11.3 advisory mode ---------------------
+    // resolveGate can only tighten the legacy decision (the resolver found a
+    // material disposition the policy counts missed); advisory mode then
+    // downgrades any block to requires_review and keeps the commit status
+    // green — in advisory mode findings are reported, never enforced. v1
+    // policies have no mode, so their enforcing behavior is unchanged.
+    const resolverGate = resolveGate(
+      evaluatedClaims.map((c, i) => ({ id: String(i + 1), disposition: c.disposition, materiality: c.materiality })),
+      advisoryMode ? { ...policy, mode: 'advisory' } : policy,
+    );
+    if (resolverGate.gate_decision === 'blocked' && gateDecision !== 'blocked') {
+      gateDecision = 'blocked';
+      statusState = 'failure';
+      statusDesc = resolverGate.reasons[0] || 'resolver: blocking claim disposition';
+    } else if (resolverGate.gate_decision === 'requires_review' && (gateDecision === 'passed' || gateDecision === 'warned')) {
+      gateDecision = 'requires_review';
+      statusState = 'failure';
+      statusDesc = resolverGate.reasons[0] || 'resolver: claim dispositions require review';
+    }
+    if (advisoryMode) {
+      if (gateDecision === 'blocked') {
+        gateDecision = 'requires_review';
+        resolverGate.reasons.push('advisory mode: blocking outcome downgraded to requires_review');
+      }
+      if (statusState === 'failure') {
+        statusState = 'success';
+        statusDesc = `advisory: ${statusDesc}`;
+      }
+    }
+
     // ---- Set commit status ----
     await setCommitStatus(accessToken, owner, repo, head_sha, statusState, statusDesc, pull_number);
 
     // ---- Post PR review with inline annotations (best-effort) ----
     const reviewResult = await postPrReview(accessToken, owner, repo, pull_number, evaluatedClaims, gateDecision, statusDesc);
+
+    // ---- Review handoff (§12.5): create Review rows for dispositions that ----
+    // need human eyes. createReviewsForGate never throws by contract (fail
+    // open, console.error) — the wrap is belt-and-suspenders so the wedge can
+    // never fail because review bookkeeping failed.
+    let reviewHandoff = { created: 0, review_ids: [] };
+    try {
+      const handoff = await createReviewsForGate(svc, {
+        claims: persistedClaims,
+        gate_decision: gateDecision,
+        repo: `${owner}/${repo}`,
+        pr_number: pull_number ?? null,
+        policy,
+        trace_id: traceId,
+      });
+      if (handoff && typeof handoff.created === 'number') reviewHandoff = handoff;
+    } catch (e) {
+      console.error('Review handoff failed:', e?.message || e);
+    }
 
     // ---- Create hash-chained audit ledger entry ----
     await createLedgerEntry(svc, {
@@ -388,6 +561,11 @@ export default async function(req) {
         policy_hash: policy.policy_hash,
         flash_summary: flashResults.summary,
         gate_decision: gateDecision,
+        resolver_version: RESOLVER_VERSION,
+        advisory_mode: advisoryMode,
+        dispositions: dispositionCounts,
+        reviews_created: reviewHandoff.created,
+        notes: runNotes,
       },
     });
 
@@ -415,10 +593,13 @@ export default async function(req) {
         text: c.text,
         category: c.category,
         risk_level: c.risk_level,
+        materiality: c.materiality,
         flash_state: c.flash_state,
         flash_signals: c.flash_signals,
         policy_decision: c.policy_decision,
         policy_rule: c.policy_rule,
+        disposition: c.disposition,
+        evidence: c.evidence || [],
         file_path: c.file_path,
         diff_line: c.diff_line,
         reused: c.reused,
@@ -430,8 +611,10 @@ export default async function(req) {
         policy_hash: policy.policy_hash,
         default_action: policy.default_action,
         rules_count: policy.rules.length,
+        mode: policy.mode === 'advisory' ? 'advisory' : 'enforcing',
       },
       gate_decision: gateDecision,
+      gate_reasons: resolverGate.reasons,
       commit_status: statusState,
       commit_description: statusDesc,
       pr_review: reviewResult ? { posted: true, review_id: reviewResult.id, review_url: reviewResult.html_url, annotations: reviewResult.annotation_count } : { posted: false },
@@ -444,6 +627,12 @@ export default async function(req) {
       },
       claims_evaluated: claimsEvaluated,
       claims_reused: claimsReused,
+      claims_found: totalClaimsFound,
+      resolver_version: RESOLVER_VERSION,
+      advisory_mode: advisoryMode,
+      dispositions: dispositionCounts,
+      reviews: reviewHandoff,
+      notes: runNotes,
       verify_url: `https://aether.ai/verify/${head_sha}`,
     });
   } catch (error) {
@@ -471,6 +660,82 @@ function validateGithubPathParams({ owner, repo, head_sha, pull_number }) {
     if (!Number.isInteger(n) || n <= 0) return 'pull_number';
   }
   return null;
+}
+
+// Materiality fallback for v1 policies (no materiality_rules): derive from the
+// claim's deterministic risk level so the resolver always has a signal. The v2
+// parser's evaluatePolicy supersedes this by returning materiality with the
+// policy's floors applied.
+function materialityFromRisk(riskLevel) {
+  if (riskLevel === 'critical') return 'critical';
+  if (riskLevel === 'high') return 'high';
+  if (riskLevel === 'low') return 'low';
+  return 'normal';
+}
+
+// Extract deduped http(s) URLs cited in a claim's text, trailing punctuation trimmed.
+const CITED_URL_RE = /https?:\/\/[^\s"'<>)\]]+/g;
+
+function citedUrls(text) {
+  const found = String(text || '').match(CITED_URL_RE) || [];
+  return [...new Set(found.map((u) => u.replace(/[.,;:!?]+$/, '')))];
+}
+
+// Pack scope check — deterministic and defensive: only marks out_of_scope when
+// the parsed policy carries a scope.ignore list (v2) and the claim's file path
+// matches one of its globs. Absent scope info → in scope (never guess).
+function isOutOfScopePath(policy, filePath) {
+  const ignore = policy && policy.scope && Array.isArray(policy.scope.ignore) ? policy.scope.ignore : [];
+  if (!ignore.length || !filePath) return false;
+  return ignore.some((glob) => globToRegExp(glob).test(filePath));
+}
+
+function globToRegExp(glob) {
+  const escaped = String(glob || '')
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, '\u0000')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\u0000/g, '.*')
+    .replace(/\?/g, '[^/]');
+  return new RegExp(`^${escaped}$`);
+}
+
+// Fetch one cited URL through attest.js's SSRF-guarded machinery and reduce it
+// to the evidence fields the wedge records. Mirrors snapshotSources' outcome
+// semantics (blocked / error / paywalled / thin); fetched_ok means the content
+// is usable for grounding (2xx, not paywalled, not thin). Never throws. The
+// full trimmed content stays in the run's snapshot cache for quote/version
+// checks and is never returned to the caller.
+const CITATION_MAX_BYTES = 200000;
+
+async function snapshotCitation(url) {
+  const fetched_at = new Date().toISOString();
+  const failure = (status, error) => ({ fetched_at, fetched_ok: false, status, content_hash: null, content_length: 0, excerpt: '', http_date: null, content: '', ...(error ? { error } : {}) });
+  try {
+    if (!(await assertSafeSourceUrl(url))) return failure('blocked');
+    const r = await safeFetchValidated(url);
+    if (r.blocked) return failure('blocked', r.error);
+    if (!r.res) return failure('error', r.error);
+    const text = await r.res.text();
+    const trimmed = text.slice(0, CITATION_MAX_BYTES);
+    const httpDate = r.res.headers.get('date') || r.res.headers.get('last-modified') || null;
+    let status = String(r.res.status);
+    let usable = r.res.status >= 200 && r.res.status < 300;
+    if (status === '401' || status === '403') { status = 'paywalled'; usable = false; }
+    else if (text.length < 500) { status = 'thin'; usable = false; }
+    return {
+      fetched_at,
+      fetched_ok: usable,
+      status,
+      content_hash: usable ? await sha256Hex(trimmed) : null,
+      content_length: text.length,
+      excerpt: usable ? trimmed.slice(0, 240) : '',
+      http_date: httpDate,
+      content: usable ? trimmed : '',
+    };
+  } catch (e) {
+    return failure('error', String((e && e.message) || e).slice(0, 200));
+  }
 }
 
 // Post a PR review with inline line-level annotations for blocked/review claims.

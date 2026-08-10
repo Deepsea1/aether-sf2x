@@ -4,11 +4,92 @@
   "properties": {
     "answer_version_id": {
       "type": "string",
-      "description": "The answer version under review."
+      "description": "The answer version under review. Set by the answer-review flow (prepareReview); gate reviews have no answer version."
     },
     "inquiry_id": {
       "type": "string",
-      "description": "Parent inquiry."
+      "description": "Parent inquiry. Set by the answer-review flow (prepareReview); gate reviews have no inquiry."
+    },
+    "review_type": {
+      "type": "string",
+      "enum": [
+        "answer",
+        "gate"
+      ],
+      "description": "What kind of review this is: 'answer' (the prepareReview answer-repair flow — legacy rows omit this field) or 'gate' (a PR-gate claim review created by createReviewsForGate, §12.5)."
+    },
+    "claim_id": {
+      "type": "string",
+      "description": "Gate reviews: the Claim record under review."
+    },
+    "claim_excerpt": {
+      "type": "string",
+      "description": "Gate reviews: excerpt of the claim text, so the queue is readable without a Claim lookup."
+    },
+    "repo": {
+      "type": "string",
+      "description": "Gate reviews: owner/repo the claim came from."
+    },
+    "pr_number": {
+      "type": "number",
+      "description": "Gate reviews: pull request number the claim came from."
+    },
+    "trace_id": {
+      "type": "string",
+      "description": "Gate reviews: telemetry trace of the gate run that opened this review."
+    },
+    "materiality": {
+      "type": "string",
+      "enum": [
+        "critical",
+        "high",
+        "normal",
+        "low"
+      ],
+      "description": "Gate reviews: claim materiality at review-creation time (§6.2). Only high/critical claims open reviews."
+    },
+    "risk_level": {
+      "type": "string",
+      "description": "Gate reviews: the claim's deterministic risk level."
+    },
+    "disposition": {
+      "type": "string",
+      "description": "Gate reviews: the §8.1 resolver disposition that triggered the review (needs_review or contradicted)."
+    },
+    "gate_decision": {
+      "type": "string",
+      "description": "Gate reviews: the gate decision of the run that opened this review."
+    },
+    "due_by": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Gate reviews: SLA deadline (§12.4). Open reviews past due_by are handled by reviewSlaSweep per on_timeout."
+    },
+    "on_timeout": {
+      "type": "string",
+      "enum": [
+        "advisory",
+        "remain_blocked"
+      ],
+      "description": "Gate reviews: SLA timeout semantics — 'advisory' expires the review to expired_advisory; 'remain_blocked' keeps it open and escalates."
+    },
+    "escalated": {
+      "type": "boolean",
+      "default": false,
+      "description": "Gate reviews: true once the SLA sweep escalated an overdue remain_blocked review. Idempotence flag — set at most once."
+    },
+    "decided_by": {
+      "type": "string",
+      "description": "Gate reviews: user who resolved the review (mirrors reviewer_id)."
+    },
+    "decided_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Gate reviews: when the review was resolved (mirrors decided_date)."
+    },
+    "rationale": {
+      "type": "string",
+      "description": "Gate reviews: required human rationale recorded at resolution."
     },
     "capability_level": {
       "type": "string",
@@ -18,12 +99,15 @@
       "type": "string",
       "enum": [
         "pending",
+        "open",
         "approved",
         "rejected",
         "flagged",
-        "killed"
+        "killed",
+        "expired_advisory"
       ],
-      "default": "pending"
+      "default": "pending",
+      "description": "'pending' is the answer-review flow's undecided state; gate reviews open as 'open' and close to approved/rejected, or 'expired_advisory' when an advisory SLA lapses."
     },
     "reviewer_id": {
       "type": "string",
@@ -50,10 +134,7 @@
       "description": "The verified / better answer version prepared by the auto-test, offered for review when the original is contested or rejected."
     }
   },
-  "required": [
-    "answer_version_id",
-    "inquiry_id"
-  ],
+  "required": [],
   "rls": {
     "create": {
       "$or": [

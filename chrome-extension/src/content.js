@@ -4,15 +4,23 @@
 //
 // P1 emergency-hardening pass: API-derived strings are never rendered via
 // innerHTML, verification runs in the background service worker (this script
-// never reads the API key), and text is re-extracted at click time. The §22.1
-// binding work (content hashing, MutationObserver invalidation, shadow DOM,
-// adapter registry) is scheduled for P3.
+// never reads the API key), and text is re-extracted at click time.
+// P3 content binding (§22.1 rows 1-3): the verified text is content-hashed at
+// click time, and a per-card MutationObserver invalidates the verdict when the
+// response mutates afterward — grey card, honest stale message, re-verify
+// affordance, one-shot per card. Shadow DOM isolation and the signed adapter
+// registry remain future §22.1 work.
 
 (function() {
   'use strict';
 
   const AETHER_ORIGIN = 'https://aether.sf2x.com';
   const AETHER_COLOR = '#6366f1';
+
+  // §22.1 invalidation tuning: how long mutations settle before re-hashing,
+  // and how many recent verdict cards keep a live content-change observer
+  const INVALIDATION_DEBOUNCE_MS = 800;
+  const MAX_CARD_OBSERVERS = 5;
 
   // Supported AI chat sites
   const SUPPORTED_SITES = [
@@ -57,6 +65,13 @@
     // click-time re-extraction never picks up a previous verdict card
     clone.querySelectorAll('button, input, script, style, .aether-verify-btn, .aether-verdict-card').forEach(el => el.remove());
     return clone.textContent.trim().replace(/\s+/g, ' ').slice(0, 5000);
+  }
+
+  // SHA-256 (hex) of the normalized response text. Every supported site is
+  // https, so the content script runs in a secure context and WebCrypto exists.
+  async function hashText(text) {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
   function createVerifyButton(container) {
@@ -109,6 +124,15 @@
         const text = extractResponseText(container);
         if (text.length <= 50) throw new Error('Response text too short to verify');
 
+        // §22.1 row 1: bind the verdict to this exact normalized text.
+        // A hash failure fails open — verification still runs, just unbound.
+        let contentHash = null;
+        try {
+          contentHash = await hashText(text);
+        } catch (hashErr) {
+          console.error('Aether: content hash unavailable', hashErr);
+        }
+
         // Verification runs in the background worker so the page never sees the API key
         const response = await chrome.runtime.sendMessage({
           type: 'VERIFY',
@@ -120,7 +144,7 @@
           throw new Error((response && response.error) || 'Verification failed');
         }
 
-        showVerdictCard(container, response.data);
+        showVerdictCard(container, response.data, contentHash);
         updateButton(btn, response.data);
       } catch (err) {
         btn.textContent = '⚠ Verify failed';
@@ -171,10 +195,13 @@
     return `${Math.round(safe / 3600)}h`;
   }
 
-  function showVerdictCard(container, result) {
-    // Remove existing card
+  function showVerdictCard(container, result, contentHash) {
+    // Remove existing card (and retire its content-change observer, if any)
     const existing = container.querySelector('.aether-verdict-card');
-    if (existing) existing.remove();
+    if (existing) {
+      if (typeof existing.__aetherDispose === 'function') existing.__aetherDispose();
+      existing.remove();
+    }
 
     // API-derived values are rendered via textContent only — never innerHTML
     const score = Number(result.trust_score) || 0;
@@ -224,6 +251,7 @@
     card.appendChild(subtitle);
 
     const stamp = document.createElement('div');
+    stamp.className = 'aether-stamp';
     stamp.style.cssText = 'margin-top: 4px; color: #94a3b8; font-size: 11px;';
     if (result.cached === true) {
       // Cache hits from verifyResponse are labeled honestly rather than re-stamped
@@ -279,6 +307,117 @@
     card.appendChild(footer);
 
     container.appendChild(card);
+    bindCardInvalidation(container, card, contentHash);
+  }
+
+  // §22.1 rows 1-3 — post-verification mutation invalidation.
+  // Each verdict card gets one MutationObserver on its response container.
+  // Extension-authored mutations (our own button/card churn) are filtered out;
+  // anything else re-extracts + re-hashes after a debounce, and a hash change
+  // greys the card — never green on stale (§25.3) — with a re-verify affordance.
+
+  // Live observer registry (dispose functions, oldest first). Capped so long
+  // chat pages never accumulate hundreds of observers.
+  const cardObservers = [];
+
+  function isExtensionNode(node) {
+    const el = node && node.nodeType === 1 ? node : node && node.parentElement;
+    return !!(el && typeof el.closest === 'function' &&
+      el.closest('.aether-verdict-card, .aether-verify-btn'));
+  }
+
+  // True when a mutation was caused by the extension's own UI — a change inside
+  // our card/button, or a childList batch that only adds/removes our nodes
+  function isExtensionMutation(mutation) {
+    if (isExtensionNode(mutation.target)) return true;
+    if (mutation.type !== 'childList') return false;
+    const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
+    return nodes.length > 0 && nodes.every(isExtensionNode);
+  }
+
+  function bindCardInvalidation(container, card, contentHash) {
+    // No hash → no binding (hashing already failed open upstream)
+    if (!contentHash) return;
+    try {
+      let timer = null;
+      let disposed = false;
+      const dispose = () => {
+        if (disposed) return;
+        disposed = true;
+        clearTimeout(timer);
+        observer.disconnect();
+        const idx = cardObservers.indexOf(dispose);
+        if (idx !== -1) cardObservers.splice(idx, 1);
+      };
+      const observer = new MutationObserver((mutations) => {
+        if (disposed) return;
+        if (!mutations.some(m => !isExtensionMutation(m))) return;
+        clearTimeout(timer);
+        timer = setTimeout(async () => {
+          if (disposed) return;
+          if (!card.isConnected) { dispose(); return; }
+          try {
+            const currentHash = await hashText(extractResponseText(container));
+            if (disposed) return;
+            if (currentHash !== contentHash) {
+              // One-shot: a card invalidates at most once, then stops observing
+              dispose();
+              invalidateCard(container, card);
+            }
+          } catch (err) {
+            console.error('Aether: content-change check failed', err);
+          }
+        }, INVALIDATION_DEBOUNCE_MS);
+      });
+      observer.observe(container, { childList: true, subtree: true, characterData: true });
+      card.__aetherDispose = dispose;
+      cardObservers.push(dispose);
+      while (cardObservers.length > MAX_CARD_OBSERVERS) cardObservers.shift()();
+    } catch (err) {
+      // Fail open: the verdict card stays usable even if the observer can't be wired
+      console.error('Aether: could not observe for content changes', err);
+    }
+  }
+
+  function invalidateCard(container, card) {
+    // Desaturate the whole card — a stale verdict must never stay green
+    card.style.filter = 'grayscale(1)';
+    card.style.opacity = '0.8';
+    card.style.borderColor = '#94a3b8';
+    card.style.background = '#94a3b814';
+    const stamp = card.querySelector('.aether-stamp');
+    if (stamp) {
+      stamp.style.color = '#64748b';
+      stamp.style.fontWeight = '600';
+      stamp.textContent = 'Content changed since verification — result no longer applies';
+    }
+    if (card.querySelector('.aether-reverify-btn')) return;
+    const reBtn = document.createElement('button');
+    reBtn.className = 'aether-reverify-btn';
+    reBtn.textContent = '↻ Re-verify';
+    reBtn.style.cssText = `
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 10px;
+      margin-top: 8px;
+      font-size: 12px;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      font-weight: 600;
+      color: ${AETHER_COLOR};
+      background: transparent;
+      border: 1px solid ${AETHER_COLOR};
+      border-radius: 16px;
+      cursor: pointer;
+    `;
+    reBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // Reuse the existing verify flow: re-runs on the current text and
+      // replaces this card (the new card gets a fresh hash + observer)
+      const verifyBtn = container.querySelector('.aether-verify-btn');
+      if (verifyBtn) verifyBtn.click();
+    });
+    card.appendChild(reBtn);
   }
 
   // Observe DOM for new AI responses (chat interfaces are dynamic)

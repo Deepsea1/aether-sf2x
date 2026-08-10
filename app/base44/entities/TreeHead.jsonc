@@ -1,0 +1,69 @@
+{
+  "name": "TreeHead",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Signing schema tag for this head ('aether.treehead.v1')."
+    },
+    "tree_size": {
+      "type": "number",
+      "description": "Number of leaves (warrants) in the FULL warrant log at checkpoint time — not a listing window."
+    },
+    "merkle_root": {
+      "type": "string",
+      "description": "RFC 6962 SHA-256 Merkle tree head (lowercase hex) over the full warrant log, ordered created_date ascending with id tie-break; leaf string = the warrant's signed_hash (its id when unsigned) — the exact ordering and leaf rule warrantRegistry uses, so a head is reproducible from the public chain listing alone."
+    },
+    "prev_root": {
+      "type": "string",
+      "description": "merkle_root of the previous TreeHead — append-only chain linking. Null on the genesis head. Signed inside the payload, so the chain link is tamper-evident, not just stored."
+    },
+    "payload_hash": {
+      "type": "string",
+      "description": "SHA-256 (lowercase hex) of the RFC 8785 canonical JSON of { schema, tree_size, merkle_root, prev_root } — the treehead.v1 signing payload, recomputable from this row's persisted fields."
+    },
+    "signed_head": {
+      "type": "string",
+      "description": "Ed25519 signature over the UTF-8 bytes of the payload_hash hex string, encoded 'sf2x_ed25519_' + base64url — the same signing conventions as warrant v2. Never an HMAC or fingerprint fallback: creation fails closed instead."
+    },
+    "key_id": {
+      "type": "string",
+      "description": "Identifier of the signing key: 'ed25519:' + first 16 hex chars of the SHA-256 of the ED25519_PUBLIC_KEY pem string."
+    },
+    "pages_scanned": {
+      "type": "number",
+      "description": "How many Warrant pages the full-log scan collected for this checkpoint — bookkeeping for the run. A head is only ever created from a COMPLETE scan; partial scans fail closed and create nothing."
+    }
+  },
+  "required": [
+    "tree_size",
+    "merkle_root",
+    "payload_hash",
+    "signed_head"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "read": null,
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}
