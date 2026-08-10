@@ -3,7 +3,8 @@ import { secrets } from 'base44:runtime';
 // CLI bundling: functions are standalone — signature helpers ride inside the
 // function dir (verbatim copy of sf2xCore.js's signature block; see sf2xVerify.ts).
 import { verifySignature, signatureScheme } from './sf2xVerify.ts';
-import { WARRANT_SCHEMA_V2, jcsCanonicalize, sha256Hex, buildWarrantV2Payload, verifyWarrantV2 } from '../../shared/canonicalSign.js';
+import { WARRANT_SCHEMA_V2, jcsCanonicalize, sha256Hex, buildWarrantV2Payload, verifyWarrantV2, signWarrantV2, publicKeyId } from '../../shared/canonicalSign.js';
+import { generateSignature } from '../../shared/sf2xCore.js';
 import { merkleRoot, inclusionProof } from '../../shared/merkle.js';
 
 // Public, read-only Warrant Registry — an append-only transparency log. Anyone
@@ -12,6 +13,12 @@ import { merkleRoot, inclusionProof } from '../../shared/merkle.js';
 // modification of a warrant changes it. No auth required (transparency).
 // Publishes integrity METADATA only — never warrant content (see the privacy
 // boundary note at the verified_warrant block below).
+//
+// CONSOLIDATED OPS (the platform's 50-function cap): this function also hosts
+// the parked aetherKeys + transparencyCheckpoint capabilities. body.op — or
+// ?op= in the URL query string, so plain GETs work — selects 'keys' |
+// 'checkpoint' | 'checkpoint_create'; an unknown op is a 400 fail-closed; no
+// op at all is the original registry behavior below, unchanged.
 
 async function sha256hex(text) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(text ?? '')));
@@ -33,11 +40,270 @@ function signingVariants(w, av) {
   ];
 }
 
+// ——— op=keys — the parked aetherKeys function (MASTER_PLAN v5 §9.3): the live
+// document behind /.well-known/aether-keys.json. Publishes the current Ed25519
+// verification key so anyone can check a warrant signature offline, with
+// nothing from us but this document. No auth (transparency), GET or POST,
+// PUBLIC key material only — the private key never leaves secrets and is only
+// presence-checked here, never read.
+//
+// SELF-SIGNING BOOTSTRAP: payload_hash/signature sign the canonical
+// { schema, keys, legacy_schemes } with the SAME key the document publishes.
+// That proves transport integrity (a tampered document fails verification),
+// not key authenticity — a first fetch must anchor trust in the serving
+// domain + the transparency log (§10). Key rotation adds cross-signatures:
+// the outgoing key signs the document that introduces its successor, so
+// verifiers can walk the chain instead of re-anchoring.
+async function opKeys() {
+  try {
+    const publicKeyPem = secrets.get('ED25519_PUBLIC_KEY');
+    // Fail closed: without the keypair there is nothing honest to publish —
+    // an unsigned or HMAC-"signed" key document would defeat its own purpose.
+    if (!publicKeyPem || !secrets.get('ED25519_PRIVATE_KEY')) {
+      return Response.json({ error: 'Ed25519 keys are not configured — key discovery is unavailable.' }, { status: 503 });
+    }
+
+    const payload = {
+      schema: 'aether.keys.v1',
+      keys: [
+        {
+          key_id: await publicKeyId(),
+          algorithm: 'Ed25519',
+          public_key_pem: publicKeyPem,
+          status: 'active',
+        },
+      ],
+      // Pre-v2 warrant seals that CANNOT be verified from public material:
+      // HMAC verifies server-side only (publishing the key makes it forgeable)
+      // and the FNV fingerprint is a content checksum, not a signature.
+      legacy_schemes: ['HMAC-SHA256 server-attested', 'FNV fingerprint'],
+    };
+
+    // signWarrantV2 fails closed to null when the keys are unusable — never
+    // publish an unattested (or non-Ed25519) key document.
+    const signed = await signWarrantV2(payload);
+    if (!signed || !String(signed.signed_hash_v2 || '').startsWith('sf2x_ed25519_')) {
+      return Response.json({ error: 'Ed25519 signing unavailable — refusing to publish an unattested key document.' }, { status: 503 });
+    }
+
+    return Response.json({
+      schema: payload.schema,
+      generated_note: 'Self-signed bootstrap: payload_hash = SHA-256 of the RFC 8785 (JCS) canonicalization of { schema, keys, legacy_schemes }; signature = Ed25519 over the UTF-8 bytes of that hex hash, by the key this document publishes. Verifies transport integrity; anchor first-fetch trust in the domain + transparency log. Rotation adds cross-signatures from the outgoing key.',
+      keys: payload.keys,
+      legacy_schemes: payload.legacy_schemes,
+      payload_hash: signed.payload_hash_v2,
+      signature: signed.signed_hash_v2,
+    });
+  } catch (error) {
+    console.error('warrantRegistry op=keys error', error);
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+}
+
+// ——— op=checkpoint / op=checkpoint_create — the parked transparencyCheckpoint
+// function (MASTER_PLAN v5 §10): durable, append-only signed tree heads over
+// the FULL warrant log. The registry's merkle_root + inclusion proofs above
+// cover the newest ≤500 warrants on demand; checkpoints make the log durable:
+// page the ENTIRE Warrant log, compute the RFC 6962 root over the same ordered
+// leaves, and persist an Ed25519-signed TreeHead chained to its predecessor
+// via prev_root. Publishing heads is the point, so reads need no auth
+// (transparency); only checkpoint CREATION is admin-gated (the keyExpirySweep
+// gate — human admins and workflow runs alike). Heads are append-only: never
+// updated, never deleted.
+//
+// CONSISTENCY HONESTY: v1 stores heads and prev_root chain links but does NOT
+// produce RFC 6962 consistency proofs between heads — a verifier can recompute
+// any single head's root from the full chain listing, and can see that heads
+// link, but cannot yet prove append-only growth between two heads from the
+// heads alone. Flagged as the follow-up in the response note + API_REFERENCE.
+
+const TREEHEAD_SCHEMA = 'aether.treehead.v1';
+const PAGE_SIZE = 500;
+// Hard ceiling mirroring ledgerIntegrityCheck — a runaway-pager guard. A log
+// larger than this fails closed (no head is created), never truncates silently.
+const MAX_LEAVES = 50000;
+const TREEHEAD_NOTE = 'Append-only signed tree heads over the FULL warrant log. v1 stores prev_root chain links but not RFC 6962 consistency proofs between heads — verify a head by recomputing the full-log root from the warrantRegistry chain listing, or trust-on-inclusion via a warrantRegistry inclusion proof. Consistency proofs between heads are a flagged follow-up.';
+
+// Integrity metadata only — a TreeHead row carries no warrant content, but the
+// projection keeps the surface explicit and stable for external verifiers.
+function publicHead(h) {
+  return {
+    head_id: h.id,
+    created_date: h.created_date,
+    schema_version: h.schema_version || TREEHEAD_SCHEMA,
+    tree_size: h.tree_size,
+    merkle_root: h.merkle_root,
+    prev_root: h.prev_root ?? null,
+    payload_hash: h.payload_hash,
+    signed_head: h.signed_head,
+    key_id: h.key_id || null,
+  };
+}
+
+// Deterministic head recency: created_date descending with id tie-break —
+// reversing the registry's leaf comparator, for the same reason (a bare
+// '-created_date' sort is not stable when timestamps collide).
+function newestFirst(a, b) {
+  const at = String(a.created_date || '');
+  const bt = String(b.created_date || '');
+  if (at !== bt) return at > bt ? -1 : 1;
+  return String(a.id) > String(b.id) ? -1 : String(a.id) < String(b.id) ? 1 : 0;
+}
+
+async function opCheckpoint(req, base44, svc, op) {
+  try {
+    let user = null;
+    try { user = await base44.auth.me(); } catch { /* unauthenticated — read-only path */ }
+    const isAdmin = !!user && user.role === 'admin';
+
+    // TreeHead reads are deny-by-default at the entity (AuditLog-style RLS), so
+    // the published view goes through the service role here — the last 10 heads,
+    // newest first.
+    const heads = ((await svc.entities.TreeHead.list('-created_date', 10).catch(() => [])) || []).sort(newestFirst);
+    const latest = heads[0] || null;
+
+    // The parked function's admin gate, plus the op split: only the explicit
+    // checkpoint_create op may create, and a non-admin (or non-POST)
+    // checkpoint_create falls back to the public read — exactly the parked
+    // function's behavior for the same request.
+    if (op !== 'checkpoint_create' || req.method !== 'POST' || !isAdmin) {
+      return Response.json({
+        registry: 'sf2x_warrants',
+        schema: TREEHEAD_SCHEMA,
+        head: latest ? publicHead(latest) : null,
+        recent_heads: heads.map(publicHead),
+        note: TREEHEAD_NOTE,
+      });
+    }
+
+    // Admin POST — the checkpoint path. Fail closed before any work: without
+    // the Ed25519 keypair there is nothing honest to persist — an unsigned or
+    // HMAC-"signed" tree head would defeat its own purpose (the aetherKeys rule).
+    if (!secrets.get('ED25519_PUBLIC_KEY') || !secrets.get('ED25519_PRIVATE_KEY')) {
+      return Response.json({ error: 'Ed25519 keys are not configured — refusing to publish an unattested tree head.' }, { status: 503 });
+    }
+
+    // Page the ENTIRE Warrant log — the $lte-cursor fail-closed pattern from
+    // ledgerIntegrityCheck (shared/ledger.js): newest-first fetch matching the
+    // platform sort, a seen-set to drop rows re-fetched across cursor-timestamp
+    // boundaries, and a hard stop on any page the cursor cannot advance past.
+    // `truncated` means the scan may not cover the whole log — and a checkpoint
+    // over a partial log is worse than none, so it FAILS CLOSED below instead
+    // of checkpointing whatever was collected.
+    const rows = [];
+    const seen = new Set();
+    let cursor = null;
+    let pagesScanned = 0;
+    let truncated = false;
+
+    while (true) {
+      const pageQuery = cursor ? { created_date: { $lte: cursor } } : {};
+      let page;
+      try {
+        page = await svc.entities.Warrant.filter(pageQuery, '-created_date', PAGE_SIZE);
+      } catch {
+        truncated = true;
+        break;
+      }
+      page = page || [];
+      if (!page.length) break;
+      pagesScanned++;
+
+      const fresh = page.filter((w) => w && !seen.has(w.id));
+      if (!fresh.length) {
+        // No progress — every returned row was already collected. A full page
+        // of duplicates means the cursor cannot advance; stop rather than loop.
+        if (page.length >= PAGE_SIZE) truncated = true;
+        break;
+      }
+      if (rows.length + fresh.length > MAX_LEAVES) {
+        truncated = true;
+        break;
+      }
+      for (const w of fresh) seen.add(w.id);
+      rows.push(...fresh);
+
+      if (page.length < PAGE_SIZE) break; // short page — the log is fully scanned
+      cursor = page[page.length - 1].created_date;
+      if (!cursor) { truncated = true; break; } // cannot advance without a cursor date
+    }
+
+    if (truncated) {
+      return Response.json({
+        error: 'Full-log scan did not complete — refusing to checkpoint a partial view of the warrant log.',
+        pages_scanned: pagesScanned,
+        rows_collected: rows.length,
+      }, { status: 503 });
+    }
+
+    // Deterministic leaf order + leaf rule — the SAME as the registry path
+    // below, so a head is reproducible from the public chain listing alone:
+    // created_date ascending with id tie-break; leaf string = signed_hash (id
+    // when unsigned).
+    rows.sort((a, b) => {
+      const at = String(a.created_date || '');
+      const bt = String(b.created_date || '');
+      if (at !== bt) return at < bt ? -1 : 1;
+      return String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0;
+    });
+    const leaves = rows.map((w) => w.signed_hash || w.id);
+    const tree_size = leaves.length;
+    const merkle_root = await merkleRoot(leaves);
+
+    if (latest && Number(latest.tree_size) === tree_size && latest.merkle_root === merkle_root) {
+      return Response.json({ unchanged: true, head: publicHead(latest), pages_scanned: pagesScanned, note: TREEHEAD_NOTE });
+    }
+
+    // Self-sign the head — the aetherKeys idiom: payload_hash = SHA-256 of the
+    // RFC 8785 (JCS) canonicalization of the fixed payload shape; signed_head =
+    // Ed25519 over the UTF-8 bytes of that hex hash, encoded 'sf2x_ed25519_' +
+    // base64url (the sf2xCore generateSignature conventions). prev_root rides
+    // INSIDE the payload, so the chain link is signed, not just stored.
+    const prev_root = latest ? latest.merkle_root : null;
+    const payload = { schema: TREEHEAD_SCHEMA, tree_size, merkle_root, prev_root };
+    const payload_hash = await sha256Hex(jcsCanonicalize(payload));
+    const signed_head = await generateSignature(payload_hash, { ed25519PrivateKey: secrets.get('ED25519_PRIVATE_KEY') });
+    // Fail closed — never persist a non-Ed25519 artifact (HMAC/fingerprint fallback) as a head.
+    if (!String(signed_head || '').startsWith('sf2x_ed25519_')) {
+      return Response.json({ error: 'Ed25519 signing unavailable — refusing to publish an unattested tree head.' }, { status: 503 });
+    }
+
+    // Append-only: heads are only ever CREATED. Existing heads are never
+    // updated or deleted, even when a later scan disagrees — a disagreement is
+    // itself the tamper evidence.
+    const created = await svc.entities.TreeHead.create({
+      schema_version: TREEHEAD_SCHEMA,
+      tree_size,
+      merkle_root,
+      prev_root,
+      payload_hash,
+      signed_head,
+      key_id: await publicKeyId(),
+      pages_scanned: pagesScanned,
+    });
+
+    return Response.json({ created: true, head: publicHead(created), pages_scanned: pagesScanned, note: TREEHEAD_NOTE });
+  } catch (error) {
+    console.error('warrantRegistry checkpoint error', error);
+    return Response.json({ error: error.message }, { status: error.status || 500 });
+  }
+}
+
 export default async function (req) {
   try {
     const base44 = createClientFromRequest(req);
     const svc = base44.asServiceRole;
     const body = await req.json().catch(() => ({}));
+
+    // Op router (function-cap consolidation): body.op first, then the URL
+    // query string so a plain GET can select an op. Absent/empty op → the
+    // original registry behavior below, unchanged. Unknown op → 400 (fail
+    // closed, never a silent fall-through to the default listing).
+    const op = body.op || new URL(req.url).searchParams.get('op') || null;
+    if (op === 'keys') return await opKeys();
+    if (op === 'checkpoint' || op === 'checkpoint_create') return await opCheckpoint(req, base44, svc, op);
+    if (op) return Response.json({ error: 'unknown op' }, { status: 400 });
+
     const limit = Math.min(Number(body.limit) || 100, 500);
 
     const warrants = await svc.entities.Warrant.list('-created_date', limit);

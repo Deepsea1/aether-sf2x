@@ -32,7 +32,7 @@ equivalent (nearest internal machinery noted).
 | `POST /v2/forge/sessions` · `POST /v2/forge/sessions/{id}/hypotheses` | — new |
 | `POST /v2/experiments/{id}/observations` | — new |
 | `POST /v2/webhooks` | — new as a standing registration (today: per-call delivery via `webhookVerify`; `WebhookConfig` rows are app-managed, not API-managed) |
-| `GET /.well-known/aether-keys.json` | **LIVE** — static pointer → `/api/functions/aetherKeys` (signed key document) |
+| `GET /.well-known/aether-keys.json` | **LIVE** — static pointer → `/api/functions/warrantRegistry?op=keys` (signed key document) |
 
 ## 2. `ClaimVerdict` and the lossy v1 mapping
 

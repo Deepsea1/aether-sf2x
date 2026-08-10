@@ -402,9 +402,16 @@ The v2 signature covers exactly this JSON object — these six keys, nothing els
 
 ### Key discovery
 
+> **Corrected 2026-08-10.** Key discovery and signed tree heads previously
+> documented standalone `aetherKeys` and `transparencyCheckpoint` functions —
+> both were consolidated into `warrantRegistry` ops (`op=keys`,
+> `op=checkpoint`, `op=checkpoint_create`) because of the platform's
+> 50-function cap; the standalone endpoints never deployed.
+
 - `GET https://aether.sf2x.com/.well-known/aether-keys.json` — a static pointer
   (`schema: "aether.keys.pointer.v1"`) naming the live endpoint.
-- `GET|POST https://aether.sf2x.com/api/functions/aetherKeys` — the live, signed
+- `GET|POST https://aether.sf2x.com/api/functions/warrantRegistry?op=keys` (POST
+  callers may send `{"op": "keys"}` in the body instead) — the live, signed
   key document (`schema: "aether.keys.v1"`, no auth): `keys[]` with `key_id`,
   `algorithm: "Ed25519"`, `public_key_pem`, and `status`, plus `legacy_schemes`
   and a self-signed `payload_hash`/`signature` over
@@ -473,11 +480,13 @@ and the `verified_warrant` block includes:
 
 ### Signed tree heads (transparency checkpoints)
 
-`GET|POST /api/functions/transparencyCheckpoint` publishes durable, append-only
+`GET|POST /api/functions/warrantRegistry?op=checkpoint` (or POST body
+`{"op": "checkpoint"}`) publishes durable, append-only
 **signed tree heads over the full warrant log** (the registry's `merkle_root`
 covers only the newest ≤500 warrants). Reads need no auth and return the latest
 head plus the last 10 (`{ registry, schema, head, recent_heads, note }`);
-creating a new checkpoint is admin-only (POST). Each head:
+creating a new checkpoint is admin-only (POST with `op=checkpoint_create`).
+Each head:
 
 ```json
 {

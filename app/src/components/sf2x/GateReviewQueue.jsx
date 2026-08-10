@@ -7,7 +7,8 @@ import { useToast } from '@/components/ui/use-toast';
 // Gate review queue (§12.4–12.5) — Review rows with review_type 'gate',
 // opened by the PR wedge for needs_review/contradicted claims at high or
 // critical materiality. Open reviews show their SLA countdown and resolve
-// through the resolveReview function (approve/reject + required rationale);
+// through prepareReview's resolve_review op (approve/reject + required
+// rationale — Base44's function cap folded resolveReview into that host);
 // decided and expired reviews collapse into a history section.
 
 const MATERIALITY_COLORS = {
@@ -173,7 +174,7 @@ export default function GateReviewQueue() {
   async function resolve(review, decision, rationale) {
     setBusy(review.id);
     try {
-      const res = await base44.functions.invoke('resolveReview', { review_id: review.id, decision, rationale });
+      const res = await base44.functions.invoke('prepareReview', { op: 'resolve_review', review_id: review.id, decision, rationale });
       const d = res?.data || res;
       if (d?.error) {
         toast({ title: 'Resolve failed', description: d.error, variant: 'destructive' });
