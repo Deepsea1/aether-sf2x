@@ -2,9 +2,12 @@
 // function so the Trust Center (and any authenticated caller) can verify the
 // hash-chained, Ed25519-signed AuditLog ledger for their own tenant.
 //
-// Scans up to `limit` recent AuditLog entries, recomputes each entry's
-// event_hash from its canonical content, verifies the Ed25519 signature, and
-// checks previous_event_hash chain continuity. See ledger.js lines 118-131.
+// Pages through AuditLog by created_date cursor (up to `max_entries`, default
+// 5000), recomputes each entry's event_hash from its canonical content,
+// verifies the Ed25519 signature as a separate check, and checks
+// previous_event_hash chain continuity across page boundaries. The response
+// separates hash vs signature failure counts and reports
+// { pages_scanned, truncated } so a partial scan is never presented as full.
 
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { ledgerIntegrityCheck } from '../../shared/ledger.js';
@@ -17,14 +20,15 @@ export default async function(req) {
 
     if (req.method !== 'POST') return Response.json({ error: 'Method not allowed' }, { status: 405 });
     const body = await req.json().catch(() => ({}));
-    const { tenant_id, limit } = body;
+    const { tenant_id, limit, max_entries } = body;
 
     const svc = base44.asServiceRole;
     // Default to the calling user's own tenant — never let a caller scan
     // another tenant's chain by omitting tenant_id.
     const result = await ledgerIntegrityCheck(svc, {
       tenant_id: tenant_id || user.id,
-      limit: limit || 500,
+      // `limit` kept as a legacy alias for callers of the pre-paging API.
+      max_entries: max_entries || limit || 5000,
     });
 
     return Response.json(result);

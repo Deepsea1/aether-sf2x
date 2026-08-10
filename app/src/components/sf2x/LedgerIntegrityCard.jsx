@@ -6,6 +6,17 @@ import { base44 } from '@/api/base44Client';
 // recompute event hashes, verify Ed25519 signatures, and check
 // previous_event_hash chain continuity on the caller's own AuditLog chain.
 // Runs automatically on mount; the button lets the viewer re-check on demand.
+
+// Names the check(s) a broken row failed — content hash, Ed25519 signature,
+// or previous-hash chain link — so the row says which check broke.
+const failedChecks = (d) => {
+  const parts = [];
+  if (d.content_valid === false) parts.push('content hash');
+  if (d.signature_valid === false) parts.push('signature');
+  if (d.chain_valid === false) parts.push('chain link');
+  return parts.join(' + ');
+};
+
 export default function LedgerIntegrityCard() {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -75,18 +86,30 @@ export default function LedgerIntegrityCard() {
 
           {broken > 0 && (
             <div className="mt-2 space-y-1.5 max-h-40 overflow-y-auto pr-1">
-              {(result.details || []).map((d, i) => (
-                <div key={d.event_id || i} className="text-[11px] rounded-lg border border-rose-400/10 bg-rose-400/[0.03] px-2.5 py-1.5">
-                  <span className="text-rose-300 font-mono">{d.event_id || 'unknown'}</span>
-                  <span className="text-slate-500"> · {d.event_type || 'unknown'}</span>
-                  <p className="text-slate-500">{d.reason || 'chain link broken'}</p>
-                </div>
-              ))}
+              {(result.details || []).map((d, i) => {
+                const failed = failedChecks(d);
+                return (
+                  <div key={d.event_id || i} className="text-[11px] rounded-lg border border-rose-400/10 bg-rose-400/[0.03] px-2.5 py-1.5">
+                    <span className="text-rose-300 font-mono">{d.event_id || 'unknown'}</span>
+                    <span className="text-slate-500"> · {d.event_type || 'unknown'}</span>
+                    {failed && <span className="text-rose-300"> · {failed} failed</span>}
+                    <p className="text-slate-500">{d.reason || 'chain link broken'}</p>
+                  </div>
+                );
+              })}
             </div>
           )}
 
           {broken === 0 && (
-            <p className="text-[11px] text-slate-500">Chain intact — every entry's hash, signature, and link to the previous entry verified.</p>
+            <p className="text-[11px] text-slate-500">
+              {result.truncated
+                ? `Scanned entries intact — hash, signature, and chain link verified for the ${checked} most recent events.`
+                : "Chain intact — every entry's hash, signature, and link to the previous entry verified."}
+            </p>
+          )}
+
+          {result.truncated && (
+            <p className="text-[11px] text-amber-300/80 mt-1.5">Partial scan — older events beyond the {checked} checked here were not verified.</p>
           )}
         </>
       )}
