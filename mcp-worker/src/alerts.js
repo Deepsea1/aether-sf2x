@@ -491,9 +491,13 @@ export function buildAlert(rawVerification, { channel, rules, force = false } = 
  * dispatchAlert — POST a built payload to a team webhook.
  *
  * The URL comes from a customer, so it is an SSRF vector: it is checked with the
- * shared `isSafeUrl` guard before any request, which rejects non-http(s) schemes and
- * private/link-local hosts. Delivery failures are returned, never thrown, so an
- * alerting outage cannot take down the verification path that triggered it.
+ * shared `isSafeUrl` guard before any request, which rejects non-http(s) schemes,
+ * embedded credentials, and private/link-local/metadata hosts. Redirects are never
+ * auto-followed — a 302 from an allowed host could point the POST at an internal
+ * target the guard never saw — so each Location is re-validated with `isSafeUrl`
+ * and followed manually, capped at 5 hops (the same loop shape as `guardedPost` in
+ * app/base44/shared/webhooks.js). Delivery failures are returned, never thrown, so
+ * an alerting outage cannot take down the verification path that triggered it.
  */
 export async function dispatchAlert(webhookUrl, payload, { fetchImpl = fetch, timeoutMs = 5000 } = {}) {
   if (!isSafeUrl(webhookUrl)) {
@@ -504,13 +508,35 @@ export async function dispatchAlert(webhookUrl, payload, { fetchImpl = fetch, ti
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
 
   try {
-    const res = await fetchImpl(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      ...(controller ? { signal: controller.signal } : {}),
-    });
-    return { ok: !!res.ok, status: res.status ?? 0 };
+    let target = webhookUrl;
+    for (let hop = 0; hop < 5; hop++) {
+      const res = await fetchImpl(target, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        redirect: 'manual',
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+      const location =
+        res.status >= 300 && res.status < 400 && res.headers && typeof res.headers.get === 'function'
+          ? res.headers.get('location')
+          : null;
+      if (location) {
+        let next;
+        try {
+          next = new URL(location, target).href;
+        } catch {
+          next = null;
+        }
+        if (!next || !isSafeUrl(next)) {
+          return { ok: false, status: 0, error: 'redirect target rejected by SSRF guard' };
+        }
+        target = next;
+        continue;
+      }
+      return { ok: !!res.ok, status: res.status ?? 0 };
+    }
+    return { ok: false, status: 0, error: 'too many redirects' };
   } catch (err) {
     return { ok: false, status: 0, error: err?.name === 'AbortError' ? 'timeout' : String(err?.message || err) };
   } finally {
