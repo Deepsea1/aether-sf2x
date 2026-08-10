@@ -1,5 +1,5 @@
 {
   "schema": "aether.keys.pointer.v1",
-  "live_endpoint": "https://aether.sf2x.com/api/functions/aetherKeys",
-  "note": "Static pointer — fetch the live endpoint for current, signed key material."
+  "live_endpoint": "https://aether.sf2x.com/api/functions/warrantRegistry?op=keys",
+  "note": "Static pointer — fetch the live endpoint for current, signed key material (served as a warrantRegistry op; the platform's 50-function cap consolidated the standalone aetherKeys function into it)."
 }

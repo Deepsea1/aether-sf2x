@@ -3,6 +3,8 @@ import { secrets } from 'base44:runtime';
 import { buildDebatePrompt, DEBATE_JSON_SCHEMA } from '../../shared/sf2xDebate.js';
 import { generateSignature, computeTrustworthyRate } from '../../shared/sf2xCore.js';
 import { buildWarrantV2Payload, signWarrantV2, sha256Hex } from '../../shared/canonicalSign.js';
+import { buildLedgerEntry } from '../../shared/ledger.js';
+import { resolveReviewRow } from '../../shared/reviews.js';
 
 const VERIFIER_SCHEMA = {
   type: 'object',
@@ -32,6 +34,15 @@ If the original answer is correct, return it (optionally tightened for precision
 
 export default async function (req) {
   try {
+    // Op routing (Base44's 50-function cap): body.op selects a hosted op and
+    // returns before the default answer-repair flow touches anything. The op
+    // is peeked off a clone of the request so the default flow's own
+    // req.json() below still reads an unconsumed body. Unknown op → 400;
+    // absent op → the original prepareReview behavior, unchanged.
+    const peeked = (await req.clone().json().catch(() => ({}))) || {};
+    if (peeked.op === 'resolve_review') return await resolveReviewOp(req);
+    if (peeked.op !== undefined) return Response.json({ error: 'unknown op' }, { status: 400 });
+
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
@@ -217,5 +228,59 @@ export default async function (req) {
   } catch (error) {
     console.error('prepareReview error', error);
     return Response.json({ error: error.message }, { status: 500 });
+  }
+}
+
+// resolve_review op — folded in from functions/resolveReview (Base44 caps apps
+// at 50 backend functions, so the standalone function cannot deploy; this host
+// carries it). Resolve a gate review (§12.5) — the human approve/reject
+// decision with a required rationale. Records decided_by/decided_at/rationale
+// on the Review row and appends a hash-chained review_resolved ledger entry.
+//
+// Separation-of-duties floor: the decider is recorded (decided_by + the
+// ledger's actor_id), which makes self-review auditable. BLOCKING self-review
+// needs authorship data the wedge lacks — GitHub commit/PR authorship is not
+// mapped to app users — so enforcement is an honest follow-up, not faked here.
+//
+// POST { op: 'resolve_review', review_id, decision: 'approved'|'rejected', rationale }
+// 400 invalid input · 404 unknown review · 409 already decided.
+async function resolveReviewOp(req) {
+  try {
+    const base44 = createClientFromRequest(req);
+    const user = await base44.auth.me();
+    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    if (req.method !== 'POST') return Response.json({ error: 'Method not allowed' }, { status: 405 });
+
+    const svc = base44.asServiceRole;
+    const body = await req.json().catch(() => ({}));
+
+    const outcome = await resolveReviewRow(svc, {
+      review_id: (body.review_id || '').toString().trim(),
+      decision: (body.decision || '').toString().trim(),
+      rationale: (body.rationale || '').toString(),
+      actor_id: user.id,
+      writeLedger: (params) => createLedgerEntry(svc, params),
+    });
+    if (!outcome.ok) return Response.json({ error: outcome.error }, { status: outcome.status });
+
+    return Response.json({
+      resolved: true,
+      review_id: outcome.review.id,
+      status: outcome.review.status,
+      decided_by: outcome.review.decided_by,
+      decided_at: outcome.review.decided_at,
+    });
+  } catch (error) {
+    console.error('resolveReview op error', error);
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+}
+
+async function createLedgerEntry(svc, params) {
+  try {
+    const entry = await buildLedgerEntry(svc, params);
+    await svc.entities.AuditLog.create(entry);
+  } catch (e) {
+    console.error('Ledger entry failed:', e?.message || e);
   }
 }
