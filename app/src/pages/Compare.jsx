@@ -11,7 +11,7 @@ import { base44 } from '@/api/base44Client';
 const STATIC_ROWS = [
   { label: 'Detection method', aether: '3-model tribunal (proposer→critic→verifier) + red-team', vectara: 'Retrieval grounding (RAG)', galileo: 'Evaluation + observability', cleanlab: 'Data-centric ML cleaning' },
   { label: 'Real-time hallucination flagging', aether: 'Yes — inline, mid-conversation', vectara: 'No (grounding score only)', galileo: 'Post-hoc eval', cleanlab: 'No (dataset-level)' },
-  { label: 'Accuracy (benchmark)', aether: '91/100 trustworthiness, AUC 1.0', vectara: 'Grounding-focused', galileo: 'Metric-based', cleanlab: 'Data-quality scores' },
+  { label: 'Accuracy (benchmark)', aether: 'AUC 1.0 / r=0.98 on published internal suite (n=24)', vectara: 'Grounding-focused', galileo: 'Metric-based', cleanlab: 'Data-quality scores' },
   { label: 'Latency', aether: '~5s fast path', vectara: 'Fast', galileo: 'Variable', cleanlab: 'Batch' },
   { label: 'End-user accessibility', aether: 'One-click verify button + Chrome extension', vectara: 'Developer API', galileo: 'Developer platform', cleanlab: 'Data team tool' },
   { label: 'Chrome extension', aether: 'Yes — ChatGPT, Claude, Gemini, Copilot', vectara: 'No', galileo: 'No', cleanlab: 'No' },

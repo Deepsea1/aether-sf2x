@@ -1,5 +1,14 @@
 # Aether — Remaining Build Plan
 
+> **SUPERSEDED (2026-08-10).** The canonical plan is now [`../docs/AETHER_MASTER_PLAN_V5.md`](../docs/AETHER_MASTER_PLAN_V5.md)
+> and its gap register (§28). Audit result for the six tasks below: #1 auto-fetch DONE in code
+> (only the connector scope re-auth remains — dashboard action); #2 ledger integrity DONE
+> (endpoint + Trust Center card); #3 PR UI polish DONE (commit 0057890); #4 public claims DONE,
+> hardened after the pr_diff leak (8ee141d, eec0253); #5 shipped as `warrantRegistry` +
+> `/warrant-proof` under different names (WarrantVerifier.jsx is intentionally a static DIY-verification
+> doc page); #6 partial — `search_claims` tool live, raw entity exposure deliberately omitted.
+> Kept for history; do not build from this file.
+
 > Hand this file to Claude Code (or any coding agent) to continue building.
 > The app is a React + Tailwind + Base44 BaaS project. All backend logic lives in `base44/functions/` and `base44/shared/`.
 

@@ -324,6 +324,13 @@ describe('dispatchAlert — SSRF is enforced before any request', () => {
     'http://169.254.169.254/latest/meta-data',
     'http://192.168.1.1/hook',
     'http://172.16.0.1/hook',
+    'http://100.64.0.1/hook', // CGNAT
+    'http://224.0.0.1/hook', // multicast
+    'http://[fe80::1]/hook', // IPv6 link-local
+    'http://[fd00::1]/hook', // IPv6 unique-local
+    'http://[::ffff:127.0.0.1]/hook', // IPv4-mapped loopback
+    'http://metadata.google.internal/computeMetadata/v1/',
+    'https://user:pass@hooks.slack.com/hook', // embedded credentials
     'file:///etc/passwd',
     'not-a-url',
   ];
@@ -370,5 +377,104 @@ describe('dispatchAlert — SSRF is enforced before any request', () => {
     );
     assert.equal(res.ok, false);
     assert.equal(res.status, 404);
+  });
+});
+
+describe('dispatchAlert — redirects are re-validated, never auto-followed', () => {
+  const redirect = (location) => ({
+    ok: false,
+    status: 302,
+    headers: { get: (name) => (name.toLowerCase() === 'location' ? location : null) },
+  });
+
+  test('sends every request with redirect:manual', async () => {
+    let seen = null;
+    await dispatchAlert(
+      'https://hooks.slack.com/services/A/B/C',
+      {},
+      { fetchImpl: async (url, init) => { seen = init; return { ok: true, status: 200 }; } },
+    );
+    assert.equal(seen.redirect, 'manual');
+  });
+
+  test('a 302 to a private target is NOT followed', async () => {
+    const calls = [];
+    const res = await dispatchAlert(
+      'https://hooks.slack.com/services/A/B/C',
+      {},
+      { fetchImpl: async (url) => { calls.push(url); return redirect('http://169.254.169.254/latest/meta-data'); } },
+    );
+    assert.deepEqual(calls, ['https://hooks.slack.com/services/A/B/C'], 'the redirect target must never be fetched');
+    assert.equal(res.ok, false);
+    assert.match(res.error, /SSRF/);
+  });
+
+  test('an unparseable Location is rejected, not followed', async () => {
+    const calls = [];
+    const res = await dispatchAlert(
+      'https://hooks.slack.com/services/A/B/C',
+      {},
+      { fetchImpl: async (url) => { calls.push(url); return redirect('http://['); } },
+    );
+    assert.equal(calls.length, 1);
+    assert.equal(res.ok, false);
+    assert.match(res.error, /SSRF/);
+  });
+
+  test('follows a safe redirect manually, re-posting the same body', async () => {
+    const calls = [];
+    const res = await dispatchAlert(
+      'https://hooks.slack.com/services/A/B/C',
+      { hello: 'world' },
+      {
+        fetchImpl: async (url, init) => {
+          calls.push({ url, body: init.body });
+          return calls.length === 1 ? redirect('https://hooks.slack.com/services/D/E/F') : { ok: true, status: 200 };
+        },
+      },
+    );
+    assert.equal(res.ok, true);
+    assert.equal(res.status, 200);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].url, 'https://hooks.slack.com/services/D/E/F');
+    assert.deepEqual(JSON.parse(calls[1].body), { hello: 'world' });
+  });
+
+  test('resolves a relative Location against the current target', async () => {
+    const calls = [];
+    await dispatchAlert(
+      'https://hooks.slack.com/services/A/B/C',
+      {},
+      {
+        fetchImpl: async (url) => {
+          calls.push(url);
+          return calls.length === 1 ? redirect('/services/moved') : { ok: true, status: 200 };
+        },
+      },
+    );
+    assert.equal(calls[1], 'https://hooks.slack.com/services/moved');
+  });
+
+  test('gives up after the hop cap instead of looping forever', async () => {
+    let calls = 0;
+    const res = await dispatchAlert(
+      'https://hooks.slack.com/services/A/B/C',
+      {},
+      { fetchImpl: async () => { calls += 1; return redirect('https://hooks.slack.com/services/next'); } },
+    );
+    assert.equal(calls, 5);
+    assert.equal(res.ok, false);
+    assert.match(res.error, /too many redirects/);
+  });
+
+  test('a 3xx without a Location is returned as-is, not treated as a redirect', async () => {
+    const res = await dispatchAlert(
+      'https://hooks.slack.com/services/A/B/C',
+      {},
+      { fetchImpl: async () => ({ ok: false, status: 304 }) },
+    );
+    assert.equal(res.ok, false);
+    assert.equal(res.status, 304);
+    assert.equal(res.error, undefined);
   });
 });

@@ -7,9 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 // Public warrant proof page — paste a warrant id OR the signed hash itself and
-// see the full cryptographic proof: signature verdict, per-claim basis, the
-// tribunal lineage that produced it, and whether YOU could re-verify it with
-// nothing but the public key. No auth. Don't trust us — verify the math.
+// see the integrity proof: signature verdict, what the warrant covers (counts),
+// the tribunal lineage that produced it, and whether YOU could re-verify it
+// with nothing but the public key. Warrant CONTENT is access-controlled — the
+// registry publishes metadata only (MASTER_PLAN v5 §9.2); the signature is the
+// public commitment to that content. No auth. Don't trust us — verify the math.
 
 function schemeBadge(v) {
   if (!v) return null;
@@ -95,8 +97,9 @@ export default function WarrantProof() {
           </div>
           <h1 className="font-heading text-2xl font-semibold text-white">Warrant Proof</h1>
           <p className="text-sm text-slate-400 mt-1.5 max-w-2xl">
-            Paste a warrant id or its signed hash. You get the full proof: the cryptographic seal,
-            every atomic claim it rests on, and the tribunal lineage that produced it.
+            Paste a warrant id or its signed hash. You get the integrity proof: the cryptographic seal,
+            what it covers, and the tribunal lineage that produced it. The content itself stays with
+            its owner — the signature is the public commitment to it.
           </p>
         </div>
 
@@ -158,55 +161,31 @@ export default function WarrantProof() {
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-[#0B0F16] p-5 mb-6">
-              <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500 mb-1">Warranted conclusion</div>
-              <div className="text-sm text-slate-200">{v.conclusion || '—'}</div>
+              <div className="text-sm font-medium text-white mb-3 flex items-center gap-2"><Scale className="h-4 w-4" /> What this warrant covers</div>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                {[
+                  ['Claims', v.claims_count],
+                  ['Premises', v.premises_count],
+                  ['Sources', v.sources_count],
+                  ['Snapshots', v.evidence_preserved],
+                  ['Flagged issues', v.issues_count],
+                ].map(([label, n]) => (
+                  <div key={label} className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-center">
+                    <div className="text-lg font-semibold text-slate-200 tabular-nums">{Number(n) || 0}</div>
+                    <div className="text-[10px] uppercase tracking-[0.14em] text-slate-500 mt-0.5">{label}</div>
+                  </div>
+                ))}
+              </div>
               <div className="mt-3 flex items-center gap-3">
                 <span className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Confidence</span>
                 <ConfidenceBar value={v.confidence_score} />
               </div>
-              {(v.premises || []).length > 0 && (
-                <div className="mt-4 pt-4 border-t border-white/10">
-                  <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500 mb-2">Premises ({v.premises.length})</div>
-                  <ul className="space-y-1.5">
-                    {v.premises.map((p, i) => (
-                      <li key={i} className="text-[13px] text-slate-300 flex gap-2"><span className="text-slate-600">{i + 1}.</span> {p}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-
-            {(v.claims || []).length > 0 && (
-              <div className="rounded-2xl border border-white/10 bg-[#0B0F16] p-5 mb-6">
-                <div className="text-sm font-medium text-white mb-3 flex items-center gap-2"><Scale className="h-4 w-4" /> Per-claim basis ({v.claims.length})</div>
-                <div className="space-y-3">
-                  {v.claims.map((c, i) => (
-                    <div key={i} className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="text-[13px] text-slate-200">{c.claim}</div>
-                        <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full border ${c.supported ? 'text-emerald-300 border-emerald-400/30' : 'text-rose-300 border-rose-400/30'}`}>
-                          {c.supported ? 'supported' : 'unsupported'}
-                        </span>
-                      </div>
-                      <div className="mt-2 flex items-center gap-3">
-                        <ConfidenceBar value={c.confidence} />
-                        {c.note && <span className="text-[11px] text-slate-500">{c.note}</span>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {(v.issues || []).length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-white/10">
-                    <div className="text-[10px] uppercase tracking-[0.16em] text-amber-400/80 mb-2">Verifier-flagged issues</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {v.issues.map((iss, i) => (
-                        <span key={i} className="text-[11px] px-2 py-0.5 rounded-full border border-amber-400/20 text-amber-200/90">{String(iss)}</span>
-                      ))}
-                    </div>
-                  </div>
-                )}
+              <div className="mt-4 pt-4 border-t border-white/10 text-[12px] text-slate-400">
+                Warrant content — the claims, premises, sources, and evidence snapshots themselves — is
+                access-controlled and stays with its owner. The signature above is the public, tamper-evident
+                commitment to that content: change any of it and verification breaks.
               </div>
-            )}
+            </div>
 
             <div className="rounded-2xl border border-white/10 bg-[#0B0F16] p-5 mb-6">
               <div className="text-sm font-medium text-white mb-3">Lineage</div>

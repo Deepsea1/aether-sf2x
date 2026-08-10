@@ -1,6 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { secrets } from 'base44:runtime';
-import { resolveApiKey, checkQuota, recordUsage, CREDIT_COSTS } from '../../shared/apiAuth.js';
+import { resolveApiKey, checkQuota, recordUsage, planBatchCharge, CREDIT_COSTS, PLAN_QUOTAS } from '../../shared/apiAuth.js';
 import { attestAnswer } from '../../shared/attest.js';
 
 // Batch Warrant API — attest up to 25 answers in one call. Each item is attested
@@ -19,12 +19,21 @@ export default async function(req) {
     if (answers.length > 25) return Response.json({ error: 'Max 25 answers per batch' }, { status: 413 });
 
     // Metering parity with warrantApi. Each item runs the identical attestAnswer work,
-    // so a batch is priced per item at the same rate. Gates on the same remaining>0 rule
-    // warrantApi uses (not remaining>=cost) so a customer with credits left is never
-    // blocked mid-batch — a batch may overshoot the quota once, exactly as a single
-    // warrantApi call already can.
+    // so a batch is priced per item at the same rate. Headroom rule (MASTER_PLAN v5
+    // §7.3): the WHOLE batch must fit the remaining credits before anything runs —
+    // reject with 429 when cost exceeds remaining; nothing runs, nothing is charged.
+    // This retires the old deliberate overshoot-once allowance (remaining>0 admitted
+    // a full batch, letting one remaining credit buy up to 25x5 credits past quota).
     const quota = await checkQuota(svc, apiKey, 'batchWarrant');
     if (!quota.allowed) return Response.json({ error: 'Monthly credit quota exceeded', plan: quota.plan, limit: quota.limit, used: quota.used, remaining: 0 }, { status: 429 });
+    // The batch-size cap stays the documented 25 (enforced above with 413); the flat
+    // per-plan map neutralizes planBatchCharge's cap check so this gates on credit
+    // headroom alone.
+    const charge = planBatchCharge({
+      plan: quota.plan, remaining: quota.remaining, endpoint: 'batchWarrant', itemCount: answers.length,
+      maxBatchByPlan: Object.fromEntries(Object.keys(PLAN_QUOTAS).map((p) => [p, 25])),
+    });
+    if (!charge.allowed) return Response.json({ error: charge.reason, plan: quota.plan, limit: quota.limit, used: quota.used, remaining: quota.remaining }, { status: charge.status });
 
     const origin = new URL(req.url).origin;
     const signatureKeys = { ed25519PrivateKey: secrets.get('ED25519_PRIVATE_KEY'), hmacKey: secrets.get('sf2x_attestation_key') };

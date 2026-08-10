@@ -1,0 +1,4 @@
+{
+  "name": "webhookVerify",
+  "entry": "entry.ts"
+}
