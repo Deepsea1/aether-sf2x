@@ -8,6 +8,8 @@ import { verifySignature, signatureScheme } from './sf2xVerify.ts';
 // can independently verify a warrant's cryptographic signature and inspect the
 // chain. The chain root hash is tamper-evident: any insertion, removal, or
 // modification of a warrant changes it. No auth required (transparency).
+// Publishes integrity METADATA only — never warrant content (see the privacy
+// boundary note at the verified_warrant block below).
 
 async function sha256hex(text) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(text ?? '')));
@@ -63,8 +65,6 @@ export default async function (req) {
     }
     if (w) {
       const av = await svc.entities.AnswerVersion.get(w.answer_version_id).catch(() => null);
-      let inquiry = null;
-      if (av?.inquiry_id) inquiry = await svc.entities.Inquiry.get(av.inquiry_id).catch(() => null);
       const stored = w.signed_hash || '';
       let valid = false;
       const scheme = signatureScheme(stored);
@@ -74,6 +74,16 @@ export default async function (req) {
           if (await verifySignature(candidate, stored, signatureKeys)) { valid = true; break; }
         }
       }
+      // PRIVACY BOUNDARY (P1 hardening — MASTER_PLAN v5 §9.2): this endpoint is
+      // unauthenticated and reads via service role, so it publishes integrity
+      // metadata ONLY — signature verdict, hashes, counts, tribunal roles. It
+      // must never return warrant CONTENT (premises, conclusion, sources, claim
+      // text, snapshots, answer/prompt excerpts): the chain below makes every
+      // warrant enumerable, so content here would make every customer inquiry
+      // readable without auth — the same data class as the searchClaims pr_diff
+      // leak (fixed in eec0253). Full content stays on the authenticated app
+      // surfaces that go through entity RLS. Follow-up: add tenant_id +
+      // is_public to Warrant for owner-scoped and opted-in public detail.
       verified = {
         warrant_id: w.id,
         answer_version_id: w.answer_version_id,
@@ -81,11 +91,11 @@ export default async function (req) {
         validity_status: w.validity_status,
         confidence_score: w.confidence_score,
         expiry_date: w.expiry_date || null,
-        premises: w.premises || [],
-        conclusion: w.conclusion || '',
-        sources: w.sources || [],
         premises_count: (w.premises || []).length,
         sources_count: (w.sources || []).length,
+        claims_count: (w.claims || []).length,
+        issues_count: (w.issues || []).length,
+        evidence_preserved: (w.source_snapshots || []).length,
         signed_hash: stored,
         signature_valid: valid,
         signature_scheme: scheme,
@@ -93,33 +103,9 @@ export default async function (req) {
         // published without becoming forgeable) — say so instead of implying more.
         publicly_verifiable: scheme === 'Ed25519',
         signature_public_key: scheme === 'Ed25519' ? secrets.get('ED25519_PUBLIC_KEY') : null,
-        // Full proof basis: per-claim verification breakdown, verifier-flagged
-        // issues, and the tribunal roles that produced this warrant (lineage).
-        claims: (w.claims || []).map((c) => ({
-          claim: c.claim,
-          supported: c.supported,
-          confidence: c.confidence,
-          note: c.note || '',
-          authoritative_grounding: c.authoritative_grounding ?? null,
-        })),
-        issues: w.issues || [],
         verifier_lineage: w.roles || [],
         support_confidence: w.support_confidence ?? null,
         detectability_confidence: w.detectability_confidence ?? null,
-        falsification: w.falsification || null,
-        source_snapshots: w.source_snapshots || [],
-        corroboration: w.corroboration || null,
-        authoritative_grounding: w.authoritative_grounding || null,
-        grounding_notes: w.grounding_notes || '',
-        lineage: av ? {
-          answer_version_id: av.id,
-          inquiry_id: av.inquiry_id,
-          version: av.version,
-          trust_score: av.trust_score,
-          stakes_level: av.stakes_level,
-          answer_excerpt: (av.answer_text || '').slice(0, 240),
-        } : null,
-        inquiry: inquiry ? { prompt: (inquiry.prompt || '').slice(0, 240), domain: inquiry.domain, stakes_level: inquiry.stakes_level } : null,
         verify_url: `/verify/${w.answer_version_id}`,
       };
     }
