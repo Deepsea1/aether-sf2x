@@ -2,6 +2,8 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { resolveApiKey, checkQuota, recordUsage, CREDIT_COSTS } from '../../shared/apiAuth.js';
 import { runRedTeamAttack } from '../../shared/redTeam.js';
 import { callLLMJson } from '../../shared/llmRouter.js';
+import { PIPELINE_VERSION, textReuseKey, lookupVerdict, storeVerdict, recordHit } from '../../shared/verdictReuse.js';
+import { buildWarrantV2Payload, signWarrantV2, sha256Hex } from '../../shared/canonicalSign.js';
 
 // verifyResponse — the fast verification endpoint behind the Aether widget and
 // browser extension. Accepts an AI-generated text and runs a single fast
@@ -101,21 +103,27 @@ export default async function (req) {
     // === CACHE: identical text returns the prior verdict with no LLM call ===
     // Viral content (everyone pasting the same AI answer) hits the DB, not the
     // LLM — the single biggest cost saver for free/public usage. 7-day TTL.
-    const cacheKey = text.slice(0, 2000);
-    try {
-      const hits = await base44.entities.Inquiry.filter({ prompt: cacheKey, domain: 'verification', status: 'answered' }, '-created_date', 1);
-      if (hits && hits.length) {
-        const versions = await base44.entities.AnswerVersion.filter({ inquiry_id: hits[0].id }, '-version', 1);
-        const av0 = versions && versions[0];
-        const cp = av0?.cognitive_state?.cache_payload;
-        if (cp && cp.tribunal_version && (cp.domain || 'General') === domain) {
-          const ageMs = Date.now() - new Date(av0.created_date || Date.now()).getTime();
-          if (ageMs < 7 * 86400000) {
-            return Response.json({ ...cp, cached: true });
-          }
+    // Exact-hash reuse (MASTER_PLAN v5 §7.2): the key hashes the FULL text plus
+    // domain, effective model, and pipeline version — the old prefix key
+    // (text.slice(0, 2000)) let two long texts sharing their first 2000 chars
+    // serve each other's verdicts. BYOK-ness folds into the model identity so a
+    // byok run only ever matches byok runs on the same model, and grounded
+    // requests (grounding_doc_ids) bypass reuse entirely — the verdict depends
+    // on the docs, which are not part of the key. The legacy Inquiry
+    // cache_payload write below stays for observability; only the read moved.
+    const effectiveModel = ownKey ? 'byok:' + String(body.own_model || 'openai/gpt-4o-mini') : 'openai/gpt-4o-mini';
+    let reuseKey = null;
+    if (!docIds.length) {
+      try {
+        reuseKey = await textReuseKey({ text_sha256: await sha256Hex(text), domain, model: effectiveModel, pipeline_version: PIPELINE_VERSION });
+        const hit = await lookupVerdict(svc, reuseKey);
+        if (hit) {
+          await recordHit(svc, hit);
+          const cache_age_seconds = Math.max(0, Math.round((Date.now() - new Date(hit.created_date || Date.now()).getTime()) / 1000));
+          return Response.json({ ...hit.payload, cached: true, cache_age_seconds });
         }
-      }
-    } catch (e) { /* cache miss is non-fatal */ }
+      } catch (e) { /* cache miss is non-fatal */ }
+    }
 
     // === ANONYMOUS DAILY RATE LIMIT — 5 free verifications/day per IP ===
     // No auth required, but caps free usage so anonymous traffic can't burn the
@@ -269,16 +277,40 @@ Respond as a single JSON object.`;
       metrics: { support_ratio: claims.length ? claims.filter((c) => c.supported).length / claims.length : 0 },
       trust_score, stakes_level: 'medium',
     });
+    const premises = claims.map((c) => c.claim).slice(0, 20);
+    const conclusion = (v.summary || text.slice(0, 500));
     const warrant = await base44.entities.Warrant.create({
       answer_version_id: av.id,
-      premises: claims.map((c) => c.claim).slice(0, 20),
-      conclusion: (v.summary || text.slice(0, 500)),
+      premises,
+      conclusion,
       confidence_score: trust_score / 100,
       validity_status: verdict === 'verified' ? 'valid' : verdict === 'contested' ? 'weak' : 'invalid',
       sources: [],
       expiry_date: new Date(Date.now() + 30 * 86400000).toISOString(),
       description: `Widget verification · ${verdict} · ${claims.length} claims · ${latency_ms}ms`,
     });
+    // Dual-sign (§9.3): additive RFC 8785 canonical v2 signature — these
+    // API-path warrants previously carried no signature at all. answer_text_sha256
+    // hashes the answer text AS PERSISTED on the AnswerVersion row (the
+    // .slice(0, 4000) above); conclusion/premises/sources mirror the values
+    // persisted on the warrant. Applied via .update, wrapped so a signing
+    // failure never fails the request (the warrant just stays v2-unsigned,
+    // like a pre-rollout one).
+    try {
+      const answerTextSha256 = await sha256Hex(text.slice(0, 4000));
+      const v2 = await signWarrantV2(buildWarrantV2Payload({
+        answer_version_id: av.id,
+        answer_text_sha256: answerTextSha256,
+        conclusion,
+        premises,
+        sources: [],
+      }));
+      if (v2) {
+        await base44.entities.Warrant.update(warrant.id, {
+          schema_version: v2.schema_version, payload_hash_v2: v2.payload_hash_v2, signed_hash_v2: v2.signed_hash_v2, key_id_v2: v2.key_id, answer_text_sha256: answerTextSha256,
+        });
+      }
+    } catch (e) { console.error('warrant v2 signing failed', e?.message || e); }
 
     // Red-team stress test — run on every verification so the widget/extension
     // verdict is certified, not just flagged uncetrified. broken/error => uncetrified.
@@ -293,7 +325,7 @@ Respond as a single JSON object.`;
     const out = {
       trust_score, verdict, corrections, claims: claimsOut, flags,
       warrant_id: warrant.id, tribunal_url: `/verify/${av.id}`, lineage_id: av.id,
-      latency_ms, tribunal_version: '2.1.0-hr-guardrails', domain, byok: !!ownKey,
+      latency_ms, tribunal_version: PIPELINE_VERSION, domain, byok: !!ownKey,
       certified, certification: certified ? 'certified' : 'uncertified',
       red_team: { outcome: redTeam.outcome, severity: redTeam.severity, run_id: redTeam.run?.id || null },
     };
@@ -301,6 +333,13 @@ Respond as a single JSON object.`;
       warrant_id: warrant.id,
       cognitive_state: { source, verdict, latency_ms, claim_count: claims.length, correction_count: corrections.length, flags, byok: !!ownKey, certified, red_team_run_id: redTeam.run?.id || null, red_team_outcome: redTeam.outcome, red_team_severity: redTeam.severity, cache_payload: out },
     }).catch(() => {});
+
+    // Exact-hash reuse store — the SAME out payload a hit returns verbatim.
+    // Errors are never stored, and grounded runs (reuseKey null) never are
+    // either. A store failure keeps the cache cold, nothing more.
+    if (reuseKey) {
+      await storeVerdict(svc, { reuse_key: reuseKey, kind: 'text', payload: out, pipeline_version: PIPELINE_VERSION, model: effectiveModel, ttl_days: 7 });
+    }
 
     // BYOK calls cost us zero credits; meter only our-LLM external calls.
     if (apiKey && !ownKey) await recordUsage(svc, apiKey, 'verifyResponse', CREDIT_COSTS.verifyResponse || 2, { inquiry_id: inquiry.id });

@@ -1,0 +1,59 @@
+{
+  "name": "VerdictReuse",
+  "type": "object",
+  "properties": {
+    "reuse_key": {
+      "type": "string",
+      "description": "Exact-hash reuse key: SHA-256 (lowercase hex) of the RFC 8785 canonical JSON of the key material ({kind, text_sha256, domain, model, pipeline_version} for text; {kind, claim_text, policy_hash, model, pipeline_version} for claim). Replaces the prefix cache key that collided on long texts sharing their first 2000 chars."
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "text",
+        "claim"
+      ],
+      "description": "What was memoized: a whole-text verification response or a single-claim verdict."
+    },
+    "payload": {
+      "type": "object",
+      "description": "The full cached response/verdict, returned verbatim on a hit (plus cached/cache_age_seconds markers added by the endpoint). Error responses are never stored."
+    },
+    "pipeline_version": {
+      "type": "string",
+      "description": "Tribunal pipeline version the payload was produced by (e.g. 2.1.0-hr-guardrails). Also folded into reuse_key, so a pipeline bump can never serve a stale-versioned verdict."
+    },
+    "model": {
+      "type": "string",
+      "description": "Effective model identity of the run, including the BYOK distinction (e.g. openai/gpt-4o-mini vs byok:openai/gpt-4o-mini) — a BYOK run only ever matches BYOK runs on the same model."
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "TTL boundary (default 7 days from store). Lookups treat a record at or past this instant — or missing it — as absent."
+    },
+    "hit_count": {
+      "type": "number",
+      "default": 0,
+      "description": "How many times this record served a cache hit. Best-effort accounting — incremented on hit, never blocks the caller."
+    }
+  },
+  "required": [
+    "reuse_key",
+    "kind",
+    "payload"
+  ],
+  "rls": {
+    "create": null,
+    "read": null,
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}
