@@ -1,21 +1,9 @@
 # Security Policy
 
-## Supported Versions
+This directory is the Base44 app source for Aether. Security reports for it follow the
+repository-wide policy: see [`../SECURITY.md`](../SECURITY.md).
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
-
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
-
-## Reporting a Vulnerability
-
-Use this section to tell people how to report a vulnerability.
-
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+Short version: use GitHub private vulnerability reporting on `Deepsea1/aether-sf2x`
+(Security tab → "Report a vulnerability") or email **cam@sf2x.com** with `[SECURITY]` in the
+subject. Acknowledgement within 72 hours; coordinated disclosure within 90 days; good-faith
+safe harbor applies. Please do not open public issues for vulnerabilities.
