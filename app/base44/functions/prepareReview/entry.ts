@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { secrets } from 'base44:runtime';
 import { buildDebatePrompt, DEBATE_JSON_SCHEMA } from '../../shared/sf2xDebate.js';
 import { generateSignature, computeTrustworthyRate } from '../../shared/sf2xCore.js';
+import { buildWarrantV2Payload, signWarrantV2, sha256Hex } from '../../shared/canonicalSign.js';
 
 const VERIFIER_SCHEMA = {
   type: 'object',
@@ -123,6 +124,23 @@ export default async function (req) {
         const key = secrets.get('sf2x_attestation_key');
         const content = [candAv.id, correctedAnswer, ''].join('|');
         const signed_hash = await generateSignature(content, key);
+        // Dual-sign (§9.3): additive RFC 8785 canonical v2 signature alongside
+        // the legacy hash. answer_text_sha256 hashes the answer text as
+        // persisted on the AnswerVersion row; conclusion/premises/sources
+        // mirror the persisted values. Never blocks warrant creation — absent
+        // keys mean no v2 fields are stored.
+        let v2 = null;
+        let answerTextSha256 = null;
+        try {
+          answerTextSha256 = await sha256Hex(correctedAnswer);
+          v2 = await signWarrantV2(buildWarrantV2Payload({
+            answer_version_id: candAv.id,
+            answer_text_sha256: answerTextSha256,
+            conclusion: correctedAnswer.slice(0, 500),
+            premises: currentWarrant?.premises || [],
+            sources: currentWarrant?.sources || [],
+          }));
+        } catch (e) { console.error('warrant v2 signing failed', e?.message || e); }
         const candWarrant = await svc.entities.Warrant.create({
           answer_version_id: candAv.id,
           premises: currentWarrant?.premises || [],
@@ -132,6 +150,7 @@ export default async function (req) {
           sources: currentWarrant?.sources || [],
           expiry_date: new Date(Date.now() + 30 * 86400000).toISOString(),
           signed_hash,
+          ...(v2 ? { schema_version: v2.schema_version, payload_hash_v2: v2.payload_hash_v2, signed_hash_v2: v2.signed_hash_v2, key_id_v2: v2.key_id, answer_text_sha256: answerTextSha256 } : {}),
         });
         candidateTrust = computeTrustworthyRate(metrics, candWarrant);
         await svc.entities.AnswerVersion.update(candAv.id, { warrant_id: candWarrant.id, trust_score: candidateTrust });

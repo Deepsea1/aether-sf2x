@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { secrets } from 'base44:runtime';
 import { buildThinkPrompt, THINK_JSON_SCHEMA, generateSignature, computeTrustworthyRate } from '../../shared/sf2xCore.js';
 import { snapshotSources } from '../../shared/attest.js';
+import { buildWarrantV2Payload, signWarrantV2, sha256Hex } from '../../shared/canonicalSign.js';
 import { emitTelemetry, newTraceId } from '../../shared/telemetry.js';
 import { runRedTeamAttack } from '../../shared/redTeam.js';
 import { callLLMJson, checkLlmBudget } from '../../shared/llmRouter.js';
@@ -174,6 +175,23 @@ export default async function(req) {
     const expiryDays = w.expiry_days || 30;
     const sourceSnapshots = await snapshotSources(w.sources || []);
     const signedHash = await generateSignature([av.id, w.conclusion || '', (w.premises || []).join(';;')].join('|'), { ed25519PrivateKey: secrets.get('ED25519_PRIVATE_KEY'), hmacKey: secrets.get('sf2x_attestation_key') || secrets.get('SF2X_ATTESTATION_KEY') });
+    // Dual-sign (§9.3): additive RFC 8785 canonical v2 signature alongside the
+    // legacy hash. answer_text_sha256 hashes the answer text as persisted on the
+    // AnswerVersion row; conclusion/premises/sources mirror the values persisted
+    // below. Never blocks warrant creation — absent keys or a signing failure
+    // just means no v2 fields are stored.
+    let v2 = null;
+    let answerTextSha256 = null;
+    try {
+      answerTextSha256 = await sha256Hex(r.answer || '');
+      v2 = await signWarrantV2(buildWarrantV2Payload({
+        answer_version_id: av.id,
+        answer_text_sha256: answerTextSha256,
+        conclusion: w.conclusion || '',
+        premises: w.premises || [],
+        sources: w.sources || [],
+      }));
+    } catch (e) { console.error('warrant v2 signing failed', e?.message || e); }
     const warrant = await svc.entities.Warrant.create({
       answer_version_id: av.id,
       premises: w.premises || [],
@@ -184,6 +202,7 @@ export default async function(req) {
       source_snapshots: sourceSnapshots,
       expiry_date: new Date(Date.now() + expiryDays * 86400000).toISOString(),
       signed_hash: signedHash,
+      ...(v2 ? { schema_version: v2.schema_version, payload_hash_v2: v2.payload_hash_v2, signed_hash_v2: v2.signed_hash_v2, key_id_v2: v2.key_id, answer_text_sha256: answerTextSha256 } : {}),
     });
     // Red-team stress test — run on every API inquiry so the warrant is certified.
     const redTeam = await runRedTeamAttack(svc, {

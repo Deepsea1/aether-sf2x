@@ -12,6 +12,7 @@ import { callLLMJson } from './llmRouter.js';
 import { runFalsifier, runCoverageCheck } from './falsifier.js';
 import { tribunalCaveat } from './caveat.js';
 import { persistClaimsAndEvidence } from './claimPersistence.js';
+import { buildWarrantV2Payload, signWarrantV2, sha256Hex } from './canonicalSign.js';
 
 // Domain-aware warrant expiry: how fast cited sources rot by domain. Medicine
 // guidance and clinical evidence decay faster than statutes, so the
@@ -548,6 +549,24 @@ export async function attestAnswer(svc, opts) {
   // warrant could self-verify when the caller omitted premises.
   const warrantPremises = premises.length ? premises : ver.claims.map((c) => c.claim);
   const signed = await generateSignature([av.id, answerText, warrantPremises.join(';;'), sources.join(';;')].join('|'), opts.signatureKeys || opts.signingKey);
+  // Dual-sign (§9.3): additive RFC 8785 canonical v2 signature alongside the
+  // legacy delimiter-joined hash. answer_text_sha256 hashes the answer text AS
+  // PERSISTED on the AnswerVersion row; conclusion/premises/sources mirror the
+  // values persisted below so the payload is recomputable from entities. Never
+  // blocks warrant creation — absent keys or a signing failure just means no
+  // v2 fields are stored.
+  let v2 = null;
+  let answerTextSha256 = null;
+  try {
+    answerTextSha256 = await sha256Hex(answerText);
+    v2 = await signWarrantV2(buildWarrantV2Payload({
+      answer_version_id: av.id,
+      answer_text_sha256: answerTextSha256,
+      conclusion: answerText.slice(0, 1000),
+      premises: warrantPremises,
+      sources,
+    }));
+  } catch (e) { console.error('warrant v2 signing failed:', e?.message || e); }
   const roles = [
     { role: 'verifier', model_family: 'anthropic', vendor: 'anthropic-via-openrouter' },
     ...(ver.falsification ? [{ role: 'falsifier', model_family: ver.falsification.cross_firm ? 'openai' : 'anthropic', vendor: ver.falsification.vendor }] : []),
@@ -562,6 +581,7 @@ export async function attestAnswer(svc, opts) {
     falsification: ver.falsification, roles,
     expiry_date: new Date(Date.now() + warrantExpiryDays(domain) * 86400000).toISOString(),
     signed_hash: signed, description: `Verified via warrantApi · support ${ver.supported}/${ver.total} · ${ver.validity} · ${ver.grounding.has_authoritative_sources ? 'authoritatively grounded' : 'generic web'} · ${sourceSnapshots.length} sources snapshotted`,
+    ...(v2 ? { schema_version: v2.schema_version, payload_hash_v2: v2.payload_hash_v2, signed_hash_v2: v2.signed_hash_v2, key_id_v2: v2.key_id, answer_text_sha256: answerTextSha256 } : {}),
   });
   await svc.entities.AnswerVersion.update(av.id, { warrant_id: warrant.id });
 
