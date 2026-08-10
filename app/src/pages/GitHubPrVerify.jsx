@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GitBranch, ShieldCheck, AlertTriangle, FileText, File, Loader2, ChevronDown, ChevronRight, Copy, Check, ExternalLink } from 'lucide-react';
+import { GitBranch, ShieldCheck, AlertTriangle, FileText, File, Loader2, ChevronDown, ChevronRight, Copy, Check, ExternalLink, Zap } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import { useToast } from '@/components/ui/use-toast';
 import PublicNav from '@/components/sf2x/PublicNav';
@@ -58,6 +58,7 @@ function ClaimRow({ claim, index }) {
             <span className={`text-[10px] uppercase tracking-wide font-medium ${POLICY_COLORS[claim.policy_decision] || 'text-slate-400'}`}>
               policy: {claim.policy_decision?.replace(/_/g, ' ')}
             </span>
+            {claim.reused && <span className="text-[10px] uppercase tracking-wide text-sky-400/80">reused</span>}
           </div>
         </div>
       </button>
@@ -415,6 +416,14 @@ export default function GitHubPrVerify() {
               <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Verification Results</div>
               <CopyMarkdownButton result={result} />
             </div>
+
+            {/* Verdict reuse note — shown only when the delta rule saved work */}
+            {result.claims_reused > 0 && (
+              <div className="flex items-center gap-2 text-xs text-sky-400/90 border border-sky-400/20 rounded-lg px-3 py-2 bg-sky-400/5">
+                <Zap className="h-3.5 w-3.5 shrink-0" />
+                <span>{result.claims_reused} of {result.claim_counts?.total ?? 0} claim verdicts reused from cache.</span>
+              </div>
+            )}
 
             {/* Gate decision */}
             <div className={`border rounded-xl p-5 ${result.gate_decision === 'passed' ? 'border-emerald-400/30 bg-emerald-400/5' : result.gate_decision === 'blocked' ? 'border-red-400/30 bg-red-400/5' : 'border-amber-400/30 bg-amber-400/5'}`}>

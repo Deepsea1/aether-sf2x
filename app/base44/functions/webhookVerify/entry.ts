@@ -2,6 +2,8 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { resolveApiKey, checkQuota, recordUsage, CREDIT_COSTS } from '../../shared/apiAuth.js';
 import { callLLMJson } from '../../shared/llmRouter.js';
 import { validateWebhookUrl, guardedPost } from '../../shared/webhooks.js';
+import { PIPELINE_VERSION, textReuseKey, lookupVerdict, recordHit } from '../../shared/verdictReuse.js';
+import { buildWarrantV2Payload, signWarrantV2, sha256Hex } from '../../shared/canonicalSign.js';
 
 // webhookVerify — the async webhook verification endpoint documented in
 // docs/API_REFERENCE.md ("Webhook Verification": one text → tribunal verdict →
@@ -21,9 +23,13 @@ import { validateWebhookUrl, guardedPost } from '../../shared/webhooks.js';
 // guardrails below mirror verifyResponse (tribunal 2.1.0-hr-guardrails) so
 // identical text scores identically on both endpoints — keep them in sync when
 // verifyResponse's pipeline evolves. Deliberately omitted vs verifyResponse:
-// cache, BYOK, grounding docs, and the red-team certification pass — none are
-// part of the documented webhook contract, and omitting the red-team call keeps
-// spend at or below /verifyResponse.
+// BYOK, grounding docs, and the red-team certification pass — none are part of
+// the documented webhook contract, and omitting the red-team call keeps spend
+// at or below /verifyResponse. The exact-hash verdict cache IS adopted, but
+// read-only: a hit reuses verifyResponse's non-BYOK entry (same prompt, model,
+// and pipeline version) and still fires a fresh webhook delivery; this endpoint
+// never writes the cache because its payloads omit the red-team certification
+// fields verifyResponse's cached responses carry.
 
 const VERIFY_SCHEMA = {
   type: 'object',
@@ -75,6 +81,32 @@ export default async function (req) {
     // nothing. guardedPost re-validates at delivery time (defense in depth).
     const urlCheck = await validateWebhookUrl(webhookUrl);
     if (!urlCheck.ok) return Response.json({ error: `invalid webhook_url: ${urlCheck.error}` }, { status: 400 });
+
+    // === CACHE (read-only): exact-hash reuse of a prior tribunal verdict ===
+    // Shares verifyResponse's non-BYOK reuse entries — identical prompt, model,
+    // and pipeline version, so the verdict is the one this endpoint would have
+    // produced. The caller asked for a delivery, not a lookup, so the webhook
+    // still fires on a hit: a cached verification with a fresh delivery.
+    // Delivery-only hits bill 0 tribunal cost — no LLM ran, so recordUsage is
+    // skipped (it no-ops on zero credits by design) and no lineage is created.
+    try {
+      const reuseKey = await textReuseKey({ text_sha256: await sha256Hex(text), domain, model: 'openai/gpt-4o-mini', pipeline_version: PIPELINE_VERSION });
+      const hit = await lookupVerdict(svc, reuseKey);
+      if (hit && hit.payload && Number.isFinite(Number(hit.payload.trust_score)) && typeof hit.payload.verdict === 'string') {
+        await recordHit(svc, hit);
+        const verification_id = String(body.verification_id || '').trim() || `vrf_${crypto.randomUUID()}`;
+        const verification = { verification_id, trust_score: hit.payload.trust_score, verdict: hit.payload.verdict, flags: Array.isArray(hit.payload.flags) ? hit.payload.flags : [], timestamp: new Date().toISOString() };
+        const sent = await guardedPost(
+          webhookUrl,
+          { 'Content-Type': 'application/json', 'x-aether-event': 'verification.complete' },
+          JSON.stringify({ data: verification }),
+        ).catch((e) => ({ ok: false, error: e?.message || 'network error' }));
+        if (!sent.ok) {
+          return Response.json({ status: 'webhook_failed', webhook_error: sent.error, verification, cached: true }, { status: 502 });
+        }
+        return Response.json({ status: 'webhook_sent', webhook_status: sent.status, verification, cached: true });
+      }
+    } catch (e) { /* cache miss is non-fatal */ }
 
     const prompt = `You are the Aether verification engine — a fast, impartial tribunal that checks an AI-generated text for hallucinations in real time. Act as proposer, critic, and verifier in a single pass.
 
@@ -200,10 +232,12 @@ Respond as a single JSON object.`;
       metrics: { support_ratio: claims.length ? claimsOut.filter((c) => c.supported).length / claims.length : 0 },
       trust_score, stakes_level: 'medium',
     });
+    const premises = claims.map((c) => c.claim).slice(0, 20);
+    const conclusion = (v.summary || text.slice(0, 500));
     const warrant = await base44.entities.Warrant.create({
       answer_version_id: av.id,
-      premises: claims.map((c) => c.claim).slice(0, 20),
-      conclusion: (v.summary || text.slice(0, 500)),
+      premises,
+      conclusion,
       confidence_score: trust_score / 100,
       validity_status: verdict === 'verified' ? 'valid' : verdict === 'contested' ? 'weak' : 'invalid',
       sources: [],
@@ -211,6 +245,28 @@ Respond as a single JSON object.`;
       description: `Webhook verification · ${verdict} · ${claims.length} claims · ${latency_ms}ms`,
     });
     await base44.entities.AnswerVersion.update(av.id, { warrant_id: warrant.id }).catch(() => {});
+    // Dual-sign (§9.3): additive RFC 8785 canonical v2 signature — these
+    // API-path warrants previously carried no signature at all. answer_text_sha256
+    // hashes the answer text AS PERSISTED on the AnswerVersion row (the
+    // .slice(0, 4000) above); conclusion/premises/sources mirror the values
+    // persisted on the warrant. Applied via .update, wrapped so a signing
+    // failure never fails the request (the warrant just stays v2-unsigned,
+    // like a pre-rollout one).
+    try {
+      const answerTextSha256 = await sha256Hex(text.slice(0, 4000));
+      const v2 = await signWarrantV2(buildWarrantV2Payload({
+        answer_version_id: av.id,
+        answer_text_sha256: answerTextSha256,
+        conclusion,
+        premises,
+        sources: [],
+      }));
+      if (v2) {
+        await base44.entities.Warrant.update(warrant.id, {
+          schema_version: v2.schema_version, payload_hash_v2: v2.payload_hash_v2, signed_hash_v2: v2.signed_hash_v2, key_id_v2: v2.key_id, answer_text_sha256: answerTextSha256,
+        });
+      }
+    } catch (e) { console.error('warrant v2 signing failed', e?.message || e); }
 
     // Metered here: the tribunal run is the billable work (same unit cost as
     // verifyResponse). A delivery failure below still returns the verification.

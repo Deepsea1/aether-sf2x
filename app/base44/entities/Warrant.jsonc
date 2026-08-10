@@ -233,6 +233,26 @@
       "type": "string",
       "description": "Cryptographic signature artifact for attestation."
     },
+    "schema_version": {
+      "type": "string",
+      "description": "Canonical signing schema tag for the v2 signature ('aether.warrant.v2'). Absent on warrants signed before the dual-sign rollout or when the Ed25519 keys were unavailable at signing time."
+    },
+    "payload_hash_v2": {
+      "type": "string",
+      "description": "SHA-256 (lowercase hex) of the RFC 8785 canonical JSON of the v2 payload {schema, answer_version_id, answer_text_sha256, conclusion, premises, sources} — recomputable from the persisted entity fields with no delimiter ambiguity."
+    },
+    "signed_hash_v2": {
+      "type": "string",
+      "description": "Ed25519 signature over the UTF-8 bytes of the payload_hash_v2 hex string, encoded 'sf2x_ed25519_' + base64url. Additive dual-sign alongside the legacy signed_hash; new verification prefers v2."
+    },
+    "key_id_v2": {
+      "type": "string",
+      "description": "Identifier of the v2 signing key: 'ed25519:' + first 16 hex chars of the SHA-256 of the ED25519_PUBLIC_KEY pem string."
+    },
+    "answer_text_sha256": {
+      "type": "string",
+      "description": "SHA-256 (lowercase hex) of the answer text AS PERSISTED on the AnswerVersion row (post-truncation), so the v2 payload can be rebuilt from entities without embedding the full answer text in the signature input."
+    },
     "description": {
       "type": "string",
       "maxLength": 1000,

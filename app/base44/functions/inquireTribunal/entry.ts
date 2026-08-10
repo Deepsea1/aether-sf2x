@@ -29,6 +29,7 @@ import { callOpenRouter } from '../../shared/openrouter.js';
 import { callAnthropic, isClaudeModel } from '../../shared/anthropic.js';
 import { tribunalCaveat } from '../../shared/caveat.js';
 import { persistClaimsAndEvidence } from '../../shared/claimPersistence.js';
+import { buildWarrantV2Payload, signWarrantV2, sha256Hex } from '../../shared/canonicalSign.js';
 
 const VALID_DOMAINS = ['General', 'Medicine', 'Finance', 'Legal', 'HR', 'Engineering', 'Science'];
 const VALID_STAKES = ['low', 'medium', 'high', 'critical'];
@@ -83,11 +84,28 @@ async function singleMode(base44, svc, { prompt, domain, stakes, model, traceId,
   const expiryDays = w.expiry_days || 30;
   const sourceSnapshots = await snapshotSources(w.sources || []);
   const signedHash = await generateSignature([av.id, w.conclusion || '', (w.premises || []).join(';;')].join('|'), { ed25519PrivateKey: secrets.get('ED25519_PRIVATE_KEY'), hmacKey: secrets.get('sf2x_attestation_key') });
+  // Dual-sign (§9.3): additive RFC 8785 canonical v2 signature alongside the
+  // legacy hash. answer_text_sha256 hashes the answer text as persisted on the
+  // AnswerVersion row; conclusion/premises/sources mirror the persisted values.
+  // Never blocks warrant creation — absent keys mean no v2 fields are stored.
+  let v2 = null;
+  let answerTextSha256 = null;
+  try {
+    answerTextSha256 = await sha256Hex(r.answer || '');
+    v2 = await signWarrantV2(buildWarrantV2Payload({
+      answer_version_id: av.id,
+      answer_text_sha256: answerTextSha256,
+      conclusion: w.conclusion || '',
+      premises: w.premises || [],
+      sources: w.sources || [],
+    }));
+  } catch (e) { console.error('warrant v2 signing failed', e?.message || e); }
   const warrant = await base44.entities.Warrant.create({
     answer_version_id: av.id, premises: w.premises || [], conclusion: w.conclusion || '',
     confidence_score: w.confidence_score ?? 0, validity_status: w.validity_status || 'valid',
     sources: w.sources || [], source_snapshots: sourceSnapshots,
     expiry_date: new Date(Date.now() + expiryDays * 86400000).toISOString(), signed_hash: signedHash,
+    ...(v2 ? { schema_version: v2.schema_version, payload_hash_v2: v2.payload_hash_v2, signed_hash_v2: v2.signed_hash_v2, key_id_v2: v2.key_id, answer_text_sha256: answerTextSha256 } : {}),
   });
   await base44.entities.AnswerVersion.update(av.id, { warrant_id: warrant.id });
   return finish(base44, svc, {
@@ -207,6 +225,22 @@ async function fastMode(base44, svc, { prompt, domain, stakes, models, traceId, 
   const sourceSnapshots = await snapshotSources(sources);
   const warrantPremises = premises.length ? premises : ver.claims.map((c) => c.claim);
   const signedHash = await generateSignature([av.id, hardenedAnswer, warrantPremises.join(';;'), sources.join(';;')].join('|'), { ed25519PrivateKey: secrets.get('ED25519_PRIVATE_KEY'), hmacKey: secrets.get('sf2x_attestation_key') });
+  // Dual-sign (§9.3): additive RFC 8785 canonical v2 signature alongside the
+  // legacy hash. answer_text_sha256 hashes the answer text as persisted on the
+  // AnswerVersion row; conclusion/premises/sources mirror the persisted values.
+  // Never blocks warrant creation — absent keys mean no v2 fields are stored.
+  let v2 = null;
+  let answerTextSha256 = null;
+  try {
+    answerTextSha256 = await sha256Hex(hardenedAnswer);
+    v2 = await signWarrantV2(buildWarrantV2Payload({
+      answer_version_id: av.id,
+      answer_text_sha256: answerTextSha256,
+      conclusion: hardenedAnswer.slice(0, 1000),
+      premises: warrantPremises,
+      sources,
+    }));
+  } catch (e) { console.error('warrant v2 signing failed', e?.message || e); }
   const fastRoles = [
     ...duo.map((m) => ({ role: 'proposer', model_family: familyOf(m), vendor: 'base44' })),
     { role: 'verifier', model_family: familyOf(usedVerifier) || 'base44', vendor: 'base44' },
@@ -222,6 +256,7 @@ async function fastMode(base44, svc, { prompt, domain, stakes, models, traceId, 
     falsification: ver.falsification, roles: fastRoles,
     expiry_date: new Date(Date.now() + 30 * 86400000).toISOString(), signed_hash: signedHash,
     description: `Fast tribunal warrant · ${ver.supported}/${ver.total} claims · ${ver.validity} · corroborated by ${corroboration.count}/${corroboration.total_models} models · verifier ${usedVerifier}`,
+    ...(v2 ? { schema_version: v2.schema_version, payload_hash_v2: v2.payload_hash_v2, signed_hash_v2: v2.signed_hash_v2, key_id_v2: v2.key_id, answer_text_sha256: answerTextSha256 } : {}),
   });
   // Persist discrete Claim + EvidencePack records for claim-level auditability.
   await persistClaimsAndEvidence(svc, {
@@ -459,6 +494,22 @@ export default async function(req) {
     const sourceSnapshots = await snapshotSources(sources);
     const warrantPremises = premises.length ? premises : ver.claims.map((c) => c.claim);
     const signedHash = await generateSignature([av.id, hardenedAnswer, warrantPremises.join(';;'), sources.join(';;')].join('|'), { ed25519PrivateKey: secrets.get('ED25519_PRIVATE_KEY'), hmacKey: secrets.get('sf2x_attestation_key') });
+    // Dual-sign (§9.3): additive RFC 8785 canonical v2 signature alongside the
+    // legacy hash. answer_text_sha256 hashes the answer text as persisted on
+    // the AnswerVersion row; conclusion/premises/sources mirror the persisted
+    // values. Never blocks warrant creation — absent keys mean no v2 fields.
+    let v2 = null;
+    let answerTextSha256 = null;
+    try {
+      answerTextSha256 = await sha256Hex(hardenedAnswer);
+      v2 = await signWarrantV2(buildWarrantV2Payload({
+        answer_version_id: av.id,
+        answer_text_sha256: answerTextSha256,
+        conclusion: hardenedAnswer.slice(0, 1000),
+        premises: warrantPremises,
+        sources,
+      }));
+    } catch (e) { console.error('warrant v2 signing failed', e?.message || e); }
     const tribunalRoles = [
       ...trio.map((m) => ({ role: 'proposer', model_family: familyOf(m), vendor: 'base44' })),
       ...trio.map((m) => ({ role: 'critic', model_family: familyOf(pickCritiqueModel(m, trio)), vendor: 'base44' })),
@@ -475,6 +526,7 @@ export default async function(req) {
       falsification: ver.falsification, roles: tribunalRoles,
       expiry_date: new Date(Date.now() + 30 * 86400000).toISOString(), signed_hash: signedHash,
       description: `Tribunal warrant · ${ver.supported}/${ver.total} claims · ${ver.validity} · corroborated by ${corroboration.count}/${corroboration.total_models} models · verifier ${verifierModels.join('+')} · ${consensus}${ver.cross_firm_verified ? ' · cross-firm' : ''}`,
+      ...(v2 ? { schema_version: v2.schema_version, payload_hash_v2: v2.payload_hash_v2, signed_hash_v2: v2.signed_hash_v2, key_id_v2: v2.key_id, answer_text_sha256: answerTextSha256 } : {}),
     });
     // Persist discrete Claim + EvidencePack records for claim-level auditability.
     await persistClaimsAndEvidence(svc, {

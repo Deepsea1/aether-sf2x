@@ -161,6 +161,16 @@
     btn.style.background = `${color}10`;
   }
 
+  // §22.1 staleness display (first slice): humanize a cache age in seconds.
+  // Non-numeric/negative ages fail closed to 0s — the result stays labeled cached.
+  function humanizeCacheAge(seconds) {
+    const s = Number(seconds);
+    const safe = Number.isFinite(s) && s >= 0 ? Math.round(s) : 0;
+    if (safe < 90) return `${safe}s`;
+    if (safe < 90 * 60) return `${Math.round(safe / 60)}m`;
+    return `${Math.round(safe / 3600)}h`;
+  }
+
   function showVerdictCard(container, result) {
     // Remove existing card
     const existing = container.querySelector('.aether-verdict-card');
@@ -215,8 +225,13 @@
 
     const stamp = document.createElement('div');
     stamp.style.cssText = 'margin-top: 4px; color: #94a3b8; font-size: 11px;';
-    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    stamp.textContent = `Verified ${time} — reflects the text at verification time`;
+    if (result.cached === true) {
+      // Cache hits from verifyResponse are labeled honestly rather than re-stamped
+      stamp.textContent = `Cached result (age ${humanizeCacheAge(result.cache_age_seconds)}) — verified content unchanged since first check`;
+    } else {
+      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      stamp.textContent = `Verified ${time} — reflects the text at verification time`;
+    }
     card.appendChild(stamp);
 
     if (corrections.length > 0) {

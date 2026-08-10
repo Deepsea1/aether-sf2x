@@ -1,7 +1,9 @@
 // GitHub PR verification — the Aether wedge. Extracts claims from a PR diff,
 // runs Aether Flash deterministic risk detection, evaluates each claim against
 // the repo's .aether/policy.yml (or system default), sets a commit status, and
-// creates Claim records + a hash-chained audit ledger entry.
+// creates Claim records + a hash-chained audit ledger entry. On a re-push of
+// the same PR, unchanged claims reuse their stored verdicts via the
+// VerdictReuse cache (MASTER_PLAN v5 §7.2 delta rule) instead of re-evaluating.
 //
 // Accepts either:
 //   - { owner, repo, pull_number, head_sha } → fetches the diff from GitHub API
@@ -17,6 +19,8 @@ import { flashScanBatch } from '../../shared/aetherFlash.js';
 import { parsePolicyYaml, evaluatePolicy, computePolicyHash } from '../../shared/policyParser.js';
 import { buildLedgerEntry } from '../../shared/ledger.js';
 import { emitTelemetry, newTraceId } from '../../shared/telemetry.js';
+import { PIPELINE_VERSION, claimReuseKey, lookupVerdicts, storeVerdict, recordHit } from '../../shared/verdictReuse.js';
+import { jcsCanonicalize, sha256Hex } from '../../shared/canonicalSign.js';
 
 const SYSTEM_DEFAULT_POLICY = parsePolicyYaml(`
 version: 1
@@ -42,6 +46,13 @@ release_gate:
     - mixed
     - supported_with_limits
 `);
+
+// No LLM participates in this wedge's per-claim evaluation today — extraction
+// (claimExtractor), the risk scan (aetherFlash), and evaluatePolicy are all
+// deterministic — so the reuse key's model component is this stable constant.
+// If an LLM tier (tribunal escalation) ever lands in this path, swap in the
+// effective model id so cached deterministic verdicts can never satisfy it.
+const EVAL_MODEL = 'deterministic';
 
 export default async function(req) {
   try {
@@ -186,15 +197,68 @@ export default async function(req) {
         policy: { source: policySource, policy_id: policy.policy_id, default_action: policy.default_action },
         gate_decision: 'passed',
         commit_status: statusState,
+        claims_evaluated: 0,
+        claims_reused: 0,
       });
     }
 
     // ---- Run Aether Flash on all claims ----
+    // Deterministic tier-0 pre-pass — always re-runs, never cached: it is free,
+    // date-dependent (stale-source years), and domain-dependent (domain is not
+    // part of the reuse key), so flash fields always come out fresh.
     const flashResults = flashScanBatch(claims.map((c) => ({ text: c.text, sources: [] })), { domain });
 
-    // ---- Evaluate each claim against the policy ----
+    // === CLAIM-LEVEL VERDICT REUSE — the §7.2 delta rule for the CI wedge ===
+    // On a re-push of the same PR, unchanged claims reuse their stored policy
+    // verdict; only new/changed claims (or a changed policy) evaluate fresh.
+    // The key binds normalized claim text + the policy inputs that actually
+    // decide a verdict + model + pipeline version, so a hit is only ever an
+    // exact re-run. policy.policy_hash is NOT used directly: computePolicyHash
+    // folds in policy_id, which parsePolicyYaml defaults to a Date.now()-based
+    // value — a timestamp that would silently poison every key. evaluatePolicy
+    // reads only default_action / rules / release_gate; version is folded in
+    // anyway so a semantic policy bump over-invalidates (the safe direction).
+    // Any cache failure degrades to full evaluation — the cache is an
+    // accelerator, never a gate.
+    let reuseKeys = [];
+    let verdictHits = new Map();
+    try {
+      const reusePolicyHash = await sha256Hex(jcsCanonicalize({
+        default_action: policy.default_action,
+        release_gate: policy.release_gate,
+        rules: policy.rules,
+        version: policy.version,
+      }));
+      reuseKeys = await Promise.all(claims.map((c) => claimReuseKey({
+        claim_text: c.text,
+        policy_hash: reusePolicyHash,
+        model: EVAL_MODEL,
+        pipeline_version: PIPELINE_VERSION,
+      })));
+      verdictHits = await lookupVerdicts(svc, reuseKeys);
+    } catch (e) {
+      console.error('Verdict reuse lookup failed, evaluating all claims:', e?.message || e);
+      reuseKeys = [];
+      verdictHits = new Map();
+    }
+
+    // ---- Evaluate each claim against the policy (cached verdicts skip this) ----
     const evaluatedClaims = claims.map((claim, i) => {
       const flash = flashResults.results[i].result;
+      const cached = reuseKeys.length === claims.length ? verdictHits.get(reuseKeys[i]) : null;
+      // Fail closed on the payload: a cached record without a usable
+      // policy_decision is a miss, never a blank verdict.
+      if (cached && cached.payload && typeof cached.payload.policy_decision === 'string' && cached.payload.policy_decision) {
+        return {
+          ...claim,
+          flash_signals: flash.signals,
+          flash_state: flash.state,
+          policy_decision: cached.payload.policy_decision,
+          policy_rule: cached.payload.policy_rule || null,
+          policy_reason: cached.payload.policy_reason || null,
+          reused: true,
+        };
+      }
       const policyResult = evaluatePolicy(policy, {
         category: claim.category,
         verdict_status: claim.verdict_status,
@@ -206,8 +270,42 @@ export default async function(req) {
         policy_decision: policyResult.action,
         policy_rule: policyResult.rule ? policyResult.rule.category : null,
         policy_reason: policyResult.reason || null,
+        reused: false,
       };
     });
+
+    // Record hits and store fresh verdicts for the next push. Both are
+    // best-effort (storeVerdict/recordHit never throw) — a cold cache costs
+    // nothing, the verdicts above are already computed. Duplicate claim texts
+    // in one run share a key; store each key once.
+    const claimsReused = evaluatedClaims.filter((c) => c.reused).length;
+    const claimsEvaluated = evaluatedClaims.length - claimsReused;
+    if (reuseKeys.length === evaluatedClaims.length) {
+      const storedKeys = new Set();
+      for (let i = 0; i < evaluatedClaims.length; i++) {
+        const c = evaluatedClaims[i];
+        if (c.reused) {
+          await recordHit(svc, verdictHits.get(reuseKeys[i]));
+        } else if (!storedKeys.has(reuseKeys[i])) {
+          storedKeys.add(reuseKeys[i]);
+          await storeVerdict(svc, {
+            reuse_key: reuseKeys[i],
+            kind: 'claim',
+            payload: {
+              category: c.category,
+              risk_level: c.risk_level,
+              verdict_status: c.verdict_status,
+              policy_decision: c.policy_decision,
+              policy_rule: c.policy_rule,
+              policy_reason: c.policy_reason,
+            },
+            pipeline_version: PIPELINE_VERSION,
+            model: EVAL_MODEL,
+            ttl_days: 7,
+          });
+        }
+      }
+    }
 
     // ---- Persist Claim records ----
     const persistedClaims = [];
@@ -283,6 +381,8 @@ export default async function(req) {
         block_count: blockCount,
         review_count: reviewCount,
         warn_count: warnCount,
+        claims_evaluated: claimsEvaluated,
+        claims_reused: claimsReused,
         policy_source: policySource,
         policy_id: policy.policy_id,
         policy_hash: policy.policy_hash,
@@ -321,6 +421,7 @@ export default async function(req) {
         policy_rule: c.policy_rule,
         file_path: c.file_path,
         diff_line: c.diff_line,
+        reused: c.reused,
       })),
       flash_summary: flashResults.summary,
       policy: {
@@ -341,6 +442,8 @@ export default async function(req) {
         warned: warnCount,
         clear: evaluatedClaims.length - blockCount - reviewCount - warnCount,
       },
+      claims_evaluated: claimsEvaluated,
+      claims_reused: claimsReused,
       verify_url: `https://aether.ai/verify/${head_sha}`,
     });
   } catch (error) {
