@@ -471,6 +471,50 @@ and the `verified_warrant` block includes:
   the legacy linear `root` (SHA-256 of the `|`-joined leaves), kept for
   existing consumers.
 
+### Signed tree heads (transparency checkpoints)
+
+`GET|POST /api/functions/transparencyCheckpoint` publishes durable, append-only
+**signed tree heads over the full warrant log** (the registry's `merkle_root`
+covers only the newest ≤500 warrants). Reads need no auth and return the latest
+head plus the last 10 (`{ registry, schema, head, recent_heads, note }`);
+creating a new checkpoint is admin-only (POST). Each head:
+
+```json
+{
+  "head_id": "<TreeHead id>",
+  "created_date": "<ISO timestamp>",
+  "schema_version": "aether.treehead.v1",
+  "tree_size": 1200,
+  "merkle_root": "<lowercase hex>",
+  "prev_root": "<previous head's merkle_root, null on the genesis head>",
+  "payload_hash": "<lowercase hex>",
+  "signed_head": "sf2x_ed25519_...",
+  "key_id": "ed25519:..."
+}
+```
+
+- **Signing payload** — exactly
+  `{ "schema": "aether.treehead.v1", "tree_size": <n>, "merkle_root": "<hex>", "prev_root": "<hex>|null" }`,
+  canonicalized per RFC 8785; `payload_hash` = lowercase SHA-256 hex of the
+  canonical bytes; `signed_head` = Ed25519 over the UTF-8 bytes of that hex
+  string (`sf2x_ed25519_` + base64url) — the same conventions as warrant v2,
+  verified with the key-discovery `public_key_pem` (match on `key_id`).
+  `prev_root` is inside the payload, so the chain link is signed.
+- **Leaves** — the full log ordered by `created_date` ascending with `id`
+  tie-break; leaf string = `signed_hash` (`id` when unsigned); root per
+  RFC 6962 as above. Same rules as the registry, so a head is independently
+  recomputable by paging the `warrantRegistry` chain — or verify a single
+  warrant against a head via its inclusion proof (trust-on-inclusion) when the
+  registry window matches the head's `tree_size`/`merkle_root`.
+- If the log is unchanged since the latest head, POST returns
+  `{ unchanged: true, head }` and creates nothing; heads are never updated or
+  deleted, and a checkpoint over a partial log scan fails closed (503) instead
+  of publishing.
+- **No consistency proofs yet** — v1 stores `prev_root` chain links but does
+  not produce RFC 6962 consistency proofs between heads, so append-only growth
+  between two heads cannot yet be proven from the heads alone. Flagged as a
+  follow-up; the response `note` says the same.
+
 ## Rate Limits
 
 | Tier | Requests/min | Requests/month |
