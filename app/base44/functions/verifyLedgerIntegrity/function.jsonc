@@ -1,0 +1,4 @@
+{
+  "name": "verifyLedgerIntegrity",
+  "entry": "entry.ts"
+}

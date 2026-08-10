@@ -1,0 +1,50 @@
+{
+  "name": "Grounding Doc Review",
+  "description": "When an inquiry grounded in customer GroundingDocs scores low trust, create a review task, suggest document improvements (TribunalLiftAudit assistant approach via InvokeLLM), and email the content owner the recommended edits for approval.",
+  "trigger": {
+    "config": {
+      "trigger_type": "entity",
+      "entity_name": "AnswerVersion",
+      "events": [
+        "create"
+      ]
+    },
+    "condition": "${ (.trigger.data.trust_score // 100) < 50 }"
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "grounding_doc_review",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "settle": {
+          "wait": "PT2M",
+          "then": "review",
+          "x-base44": {
+            "title": "Let the tribunal review settle",
+            "description": "Wait so the tribunal-escalation review lands first"
+          }
+        }
+      },
+      {
+        "review": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "reviewGroundingDoc",
+            "args": {
+              "answer_version_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Review grounding docs",
+            "description": "Suggest edits & email owners"
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,181 @@
+{
+  "name": "Policy",
+  "type": "object",
+  "properties": {
+    "policy_id": {
+      "type": "string",
+      "description": "Human-readable policy id (e.g. customer_claims_production_v3)."
+    },
+    "version": {
+      "type": "number",
+      "default": 1,
+      "description": "Monotonically increasing version number."
+    },
+    "effective_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this policy version becomes active."
+    },
+    "default_action": {
+      "type": "string",
+      "enum": [
+        "allow",
+        "warn",
+        "require_review",
+        "block",
+        "ignore"
+      ],
+      "default": "warn",
+      "description": "Action when no rule matches."
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "Claim category this rule applies to."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "warn",
+              "require_verification",
+              "require_human_review",
+              "block_if_stale",
+              "block",
+              "ignore"
+            ]
+          },
+          "min_evidence_tier": {
+            "type": "string",
+            "enum": [
+              "primary_authoritative",
+              "primary_operational",
+              "qualified_secondary",
+              "unverified_secondary",
+              "user_supplied"
+            ]
+          },
+          "freshness_days": {
+            "type": "number",
+            "description": "Max acceptable source age in days (for block_if_stale)."
+          },
+          "require_warrant": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "category",
+          "action"
+        ]
+      },
+      "description": "Ordered rules \u2014 first match wins."
+    },
+    "release_gate": {
+      "type": "object",
+      "properties": {
+        "block_on": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Verdict statuses that block release (e.g. contradicted, unsupported)."
+        },
+        "require_review_on": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Verdict statuses that require human review before release."
+        }
+      },
+      "description": "Release gate enforcement config."
+    },
+    "source_yaml": {
+      "type": "string",
+      "description": "The raw .aether/policy.yml source text this policy was parsed from."
+    },
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "repository",
+        "manual",
+        "system_default"
+      ],
+      "default": "manual",
+      "description": "Where the policy originated."
+    },
+    "source_repo": {
+      "type": "string",
+      "description": "GitHub repo (owner/repo) the policy was loaded from, if repository-sourced."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "active",
+        "simulated",
+        "superseded",
+        "retired"
+      ],
+      "default": "draft",
+      "description": "Lifecycle state of this policy version."
+    },
+    "policy_hash": {
+      "type": "string",
+      "description": "SHA-256 of the canonical policy content \u2014 linked from warrants for reproducibility."
+    },
+    "simulation_result": {
+      "type": "object",
+      "description": "Result of the last policy simulation (affected items, expected blocks/warnings).",
+      "properties": {
+        "affected_prs": {
+          "type": "number"
+        },
+        "expected_blocks": {
+          "type": "number"
+        },
+        "expected_warnings": {
+          "type": "number"
+        },
+        "review_burden": {
+          "type": "number"
+        },
+        "simulated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Optional free-text description."
+    }
+  },
+  "required": [
+    "policy_id"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": null,
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

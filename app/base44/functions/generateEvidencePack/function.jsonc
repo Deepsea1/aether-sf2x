@@ -1,0 +1,4 @@
+{
+  "name": "generateEvidencePack",
+  "entry": "entry.ts"
+}

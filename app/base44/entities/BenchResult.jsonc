@@ -1,0 +1,89 @@
+{
+  "name": "BenchResult",
+  "type": "object",
+  "properties": {
+    "system_name": {
+      "type": "string",
+      "description": "Name of the system/deployment scored."
+    },
+    "domain": {
+      "type": "string"
+    },
+    "warrant_rate": {
+      "type": "number",
+      "description": "Fraction of answers that carried a valid warrant, 0-1."
+    },
+    "trustworthy_rate": {
+      "type": "number",
+      "description": "Mean trustworthy answer rate, 0-100."
+    },
+    "correction_rate": {
+      "type": "number"
+    },
+    "mean_time_to_correction": {
+      "type": "number"
+    },
+    "resistance_rate": {
+      "type": "number",
+      "description": "Fraction of red-team attacks resisted, 0-1."
+    },
+    "drift_score": {
+      "type": "number"
+    },
+    "bench_score": {
+      "type": "number",
+      "description": "Composite SF2X Bench score, 0-100."
+    },
+    "certified": {
+      "type": "boolean",
+      "default": false
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Optional free-text description."
+    }
+  },
+  "required": [
+    "system_name"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "read": null,
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

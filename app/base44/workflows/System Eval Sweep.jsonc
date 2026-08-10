@@ -1,0 +1,163 @@
+{
+  "name": "System Eval Sweep",
+  "description": "Runs daily to automatically evaluate every active AI system with diagnostic tests, red-team, and tribunal benchmarks \u2014 flagging and degrading any that fail the safety thresholds. Partitioned into fixed chunks so each step evaluates only its slice of the registry (well under the per-invocation timeout) instead of one 504-prone call for all systems.",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 6 * * *",
+      "one_time_date": null,
+      "timezone": "America/Los_Angeles",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "system_eval_sweep",
+      "version": "1.1",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "chunk_0": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runSystemEvalSweep",
+            "args": {
+              "chunk_index": 0,
+              "chunk_size": 3
+            }
+          },
+          "then": "w0",
+          "x-base44": {
+            "title": "Eval chunk 0 (systems 1-3)",
+            "description": "Evaluate the first slice of the registry"
+          }
+        }
+      },
+      {
+        "w0": {
+          "wait": "PT2S",
+          "then": "chunk_1"
+        }
+      },
+      {
+        "chunk_1": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runSystemEvalSweep",
+            "args": {
+              "chunk_index": 1,
+              "chunk_size": 3
+            }
+          },
+          "then": "w1",
+          "x-base44": {
+            "title": "Eval chunk 1 (systems 4-6)",
+            "description": "Evaluate the second slice of the registry"
+          }
+        }
+      },
+      {
+        "w1": {
+          "wait": "PT2S",
+          "then": "chunk_2"
+        }
+      },
+      {
+        "chunk_2": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runSystemEvalSweep",
+            "args": {
+              "chunk_index": 2,
+              "chunk_size": 3
+            }
+          },
+          "then": "w2",
+          "x-base44": {
+            "title": "Eval chunk 2 (systems 7-9)",
+            "description": "Evaluate the third slice of the registry"
+          }
+        }
+      },
+      {
+        "w2": {
+          "wait": "PT2S",
+          "then": "chunk_3"
+        }
+      },
+      {
+        "chunk_3": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runSystemEvalSweep",
+            "args": {
+              "chunk_index": 3,
+              "chunk_size": 3
+            }
+          },
+          "then": "w3",
+          "x-base44": {
+            "title": "Eval chunk 3 (systems 10-12)",
+            "description": "Evaluate the fourth slice of the registry"
+          }
+        }
+      },
+      {
+        "w3": {
+          "wait": "PT2S",
+          "then": "chunk_4"
+        }
+      },
+      {
+        "chunk_4": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runSystemEvalSweep",
+            "args": {
+              "chunk_index": 4,
+              "chunk_size": 3
+            }
+          },
+          "then": "w4",
+          "x-base44": {
+            "title": "Eval chunk 4 (systems 13-15)",
+            "description": "Evaluate the fifth slice of the registry"
+          }
+        }
+      },
+      {
+        "w4": {
+          "wait": "PT2S",
+          "then": "chunk_5"
+        }
+      },
+      {
+        "chunk_5": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runSystemEvalSweep",
+            "args": {
+              "chunk_index": 5,
+              "chunk_size": 3
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Eval chunk 5 (systems 16-18)",
+            "description": "Headroom slice \u2014 no-op when the registry is smaller than this range"
+          }
+        }
+      }
+    ]
+  }
+}

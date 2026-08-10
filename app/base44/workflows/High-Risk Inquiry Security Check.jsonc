@@ -1,0 +1,88 @@
+{
+  "name": "High-Risk Inquiry Security Check",
+  "description": "When a new inquiry is flagged high-risk (high/critical stakes), run an automated red-team attack, compute the deployment benchmark score, and email the security team if the score falls below threshold.",
+  "trigger": {
+    "config": {
+      "trigger_type": "entity",
+      "entity_name": "Inquiry",
+      "events": [
+        "create"
+      ]
+    },
+    "condition": "${ .trigger.data.stakes_level == \"high\" or .trigger.data.stakes_level == \"critical\" }"
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "high_risk_security_check",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "settle": {
+          "wait": "PT20S",
+          "then": "run_red_team",
+          "x-base44": {
+            "title": "Wait for answer to settle",
+            "description": "Let the warranted answer materialize"
+          }
+        }
+      },
+      {
+        "run_red_team": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runSecurityRedTeam",
+            "args": {
+              "inquiry_id": "${ .trigger.entity_id }"
+            }
+          },
+          "then": "check_threshold",
+          "x-base44": {
+            "title": "Run red-team + score",
+            "description": "Attack the answer, compute bench score"
+          }
+        }
+      },
+      {
+        "check_threshold": {
+          "switch": [
+            {
+              "when": "${ .run_red_team.below_threshold == true }",
+              "then": "notify_security"
+            },
+            {
+              "when": "${ true }",
+              "then": "end"
+            }
+          ],
+          "x-base44": {
+            "title": "Below threshold?",
+            "description": "Branch on bench score vs threshold"
+          }
+        }
+      },
+      {
+        "notify_security": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "notifySecurityTeam",
+            "args": {
+              "inquiry_id": "${ .trigger.entity_id }",
+              "bench_score": "${ .run_red_team.bench_score }",
+              "threshold": "${ .run_red_team.threshold }",
+              "attack_outcome": "${ .run_red_team.attack_outcome }",
+              "severity": "${ .run_red_team.severity }"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Notify security team",
+            "description": "Email admins the alert"
+          }
+        }
+      }
+    ]
+  }
+}

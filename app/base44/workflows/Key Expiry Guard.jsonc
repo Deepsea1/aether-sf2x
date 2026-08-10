@@ -1,0 +1,44 @@
+{
+  "name": "Key Expiry Guard",
+  "description": "Daily sweep at 6am (PT): warns API-key owners 7 days before their key expires, and auto-revokes any key that expired without renewal or rotation \u2014 alerting the account admins.",
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 6 * * *",
+      "one_time_date": null,
+      "timezone": "America/Los_Angeles",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "key_expiry_guard",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "sweep": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "keyExpirySweep"
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Run key-expiry sweep",
+            "description": "Warn owners 7 days out; revoke expired keys"
+          }
+        }
+      }
+    ]
+  }
+}

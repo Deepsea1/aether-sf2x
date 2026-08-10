@@ -1,0 +1,144 @@
+{
+  "name": "Telemetry",
+  "type": "object",
+  "properties": {
+    "trace_id": {
+      "type": "string",
+      "description": "Groups all spans belonging to one request/workflow."
+    },
+    "span_id": {
+      "type": "string",
+      "description": "Unique id for this single telemetry event/span."
+    },
+    "parent_span_id": {
+      "type": "string",
+      "description": "Parent span id, for nested trace structure."
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "request_received",
+        "prompt_received",
+        "model_started",
+        "model_completed",
+        "model_failed",
+        "retrieval_started",
+        "retrieval_completed",
+        "tool_called",
+        "tool_completed",
+        "policy_checked",
+        "policy_blocked",
+        "policy_allowed",
+        "review_opened",
+        "review_updated",
+        "review_resolved",
+        "provenance_signed",
+        "provenance_verified",
+        "provenance_revoked",
+        "gate_checked",
+        "gate_passed",
+        "gate_failed",
+        "export_created",
+        "export_verified",
+        "incident_opened",
+        "incident_updated",
+        "incident_resolved",
+        "drift_detected",
+        "alert_triggered"
+      ],
+      "description": "Standardized telemetry event type."
+    },
+    "span_type": {
+      "type": "string",
+      "enum": [
+        "operation",
+        "model_call",
+        "retrieval",
+        "tool_call",
+        "policy_check",
+        "review",
+        "provenance",
+        "export",
+        "gate_check"
+      ],
+      "default": "operation"
+    },
+    "group": {
+      "type": "string",
+      "enum": [
+        "identity",
+        "prompt",
+        "model",
+        "retrieval",
+        "tool",
+        "governance",
+        "evaluation",
+        "review",
+        "provenance",
+        "performance",
+        "drift",
+        "export_pack"
+      ],
+      "description": "Primary telemetry group this event belongs to."
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "info",
+        "warn",
+        "error"
+      ],
+      "default": "info"
+    },
+    "linked_entity_type": {
+      "type": "string",
+      "description": "Entity kind this telemetry concerns (Inquiry, AnswerVersion, ModelBenchRun, Review, ...)."
+    },
+    "linked_entity_id": {
+      "type": "string",
+      "description": "Id of the linked entity."
+    },
+    "context": {
+      "type": "object",
+      "description": "Full grouped telemetry payload. Only the groups relevant to this event are populated: identity, prompt, model, retrieval, tool, governance, evaluation, review, provenance, performance, drift, export_pack, summary."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Optional free-text description."
+    }
+  },
+  "required": [
+    "trace_id",
+    "event_type"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

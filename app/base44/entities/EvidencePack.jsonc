@@ -1,0 +1,224 @@
+{
+  "name": "EvidencePack",
+  "type": "object",
+  "properties": {
+    "claim_id": {
+      "type": "string",
+      "description": "The Claim this evidence pack backs."
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "publisher": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "capture_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source_version": {
+            "type": "string"
+          },
+          "content_hash": {
+            "type": "string",
+            "description": "SHA-256 of the fetched content."
+          },
+          "authority_tier": {
+            "type": "string",
+            "enum": [
+              "primary_authoritative",
+              "primary_operational",
+              "qualified_secondary",
+              "unverified_secondary",
+              "user_supplied"
+            ],
+            "description": "Evidence trust tier."
+          },
+          "freshness_days": {
+            "type": "number",
+            "description": "Age of the source content in days at capture time."
+          },
+          "freshness_status": {
+            "type": "string",
+            "enum": [
+              "current",
+              "stale",
+              "unknown"
+            ]
+          },
+          "retraction_status": {
+            "type": "string",
+            "enum": [
+              "none",
+              "retracted",
+              "corrected",
+              "disputed"
+            ]
+          },
+          "quarantined": {
+            "type": "boolean",
+            "default": false
+          },
+          "quarantine_reason": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "All sources evaluated for this claim, with per-source trust metadata."
+    },
+    "supporting_excerpts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_url": {
+            "type": "string"
+          },
+          "excerpt": {
+            "type": "string"
+          },
+          "match_score": {
+            "type": "number"
+          }
+        }
+      },
+      "description": "Excerpts from sources that support the claim."
+    },
+    "conflicting_excerpts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_url": {
+            "type": "string"
+          },
+          "excerpt": {
+            "type": "string"
+          },
+          "match_score": {
+            "type": "number"
+          }
+        }
+      },
+      "description": "Excerpts from sources that conflict with or contradict the claim."
+    },
+    "source_authority_summary": {
+      "type": "string",
+      "enum": [
+        "primary_authoritative",
+        "primary_operational",
+        "qualified_secondary",
+        "unverified_secondary",
+        "user_supplied",
+        "mixed"
+      ],
+      "description": "Aggregate authority level of the evidence set."
+    },
+    "freshness_summary": {
+      "type": "string",
+      "enum": [
+        "current",
+        "stale",
+        "mixed",
+        "unknown"
+      ],
+      "description": "Aggregate freshness of the evidence set."
+    },
+    "coverage": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "high_coverage",
+        "partial",
+        "sampled",
+        "unverified"
+      ],
+      "default": "unverified",
+      "description": "How completely the evidence covers the claim's scope."
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Stated limitations of the evidence (e.g. 'excludes post-cutoff material')."
+    },
+    "manifest_hash": {
+      "type": "string",
+      "description": "SHA-256 hash of the canonical evidence manifest \u2014 tamper-evidence for the pack."
+    },
+    "tenant_id": {
+      "type": "string",
+      "description": "Tenant isolation key."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Optional free-text description."
+    }
+  },
+  "required": [
+    "claim_id"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "data.tenant_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

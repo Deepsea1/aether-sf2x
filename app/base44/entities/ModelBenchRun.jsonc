@@ -1,0 +1,116 @@
+{
+  "name": "ModelBenchRun",
+  "type": "object",
+  "properties": {
+    "question": {
+      "type": "string",
+      "description": "The benchmark question every model was tested on for this run."
+    },
+    "question_date": {
+      "type": "string",
+      "description": "YYYY-MM-DD the run was executed (for daily grouping)."
+    },
+    "model": {
+      "type": "string",
+      "description": "Model identifier tested, e.g. claude_opus_4_8."
+    },
+    "model_label": {
+      "type": "string",
+      "description": "Human-readable model name."
+    },
+    "answer_text": {
+      "type": "string",
+      "description": "The answer the model produced."
+    },
+    "trust_score": {
+      "type": "number",
+      "description": "Epistemic trustworthy rate 0-100."
+    },
+    "correctness": {
+      "type": "number",
+      "description": "Verifier-judged factual correctness 0-1 (null if unverifiable)."
+    },
+    "is_winner": {
+      "type": "boolean",
+      "default": false,
+      "description": "True if this model tied for top correctness on the question."
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Epistemic metric snapshot from the model's answer."
+    },
+    "warrant_summary": {
+      "type": "object",
+      "description": "Warrant snapshot: validity, confidence, premises count, sources count."
+    },
+    "latency_ms": {
+      "type": "number",
+      "description": "Model response latency in milliseconds."
+    },
+    "run_type": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "daily",
+        "tribunal"
+      ],
+      "default": "manual"
+    },
+    "verifier_notes": {
+      "type": "string",
+      "description": "Verifier rationale for the correctness score."
+    },
+    "error": {
+      "type": "string",
+      "description": "Error message if the model failed to produce an answer."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Optional free-text description."
+    }
+  },
+  "required": [
+    "question",
+    "model"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "read": null,
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

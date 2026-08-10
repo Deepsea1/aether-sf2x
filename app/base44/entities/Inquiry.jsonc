@@ -1,0 +1,114 @@
+{
+  "name": "Inquiry",
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "The submitted question or prompt."
+    },
+    "domain": {
+      "type": "string",
+      "description": "Knowledge domain, e.g. Medicine, Finance, Legal."
+    },
+    "stakes_level": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "default": "medium"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "thinking",
+        "answered",
+        "review",
+        "failed"
+      ],
+      "default": "thinking"
+    },
+    "customer_id": {
+      "type": "string",
+      "description": "Customer (app user) who owns this inquiry, for multi-tenant isolation and usage metering."
+    },
+    "ip_hash": {
+      "type": "string",
+      "description": "Hashed client IP for anonymous (free-tier) daily rate limiting. Null for authenticated/API-key calls."
+    },
+    "grounding_doc_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "GroundingDoc ids used to ground this inquiry (opt-in, via the tribunal grounding_doc_ids param). Drives the grounding-doc review workflow when the inquiry scores low trust."
+    },
+    "validated_answer": {
+      "type": "string",
+      "description": "Tribunal-validated answer summary written by the escalation workflow (consensus, trust, corrections, recommended action)."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Optional free-text description."
+    }
+  },
+  "required": [
+    "prompt"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "data.customer_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

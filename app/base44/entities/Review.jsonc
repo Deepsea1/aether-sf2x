@@ -1,0 +1,96 @@
+{
+  "name": "Review",
+  "type": "object",
+  "properties": {
+    "answer_version_id": {
+      "type": "string",
+      "description": "The answer version under review."
+    },
+    "inquiry_id": {
+      "type": "string",
+      "description": "Parent inquiry."
+    },
+    "capability_level": {
+      "type": "string",
+      "description": "Gate level that triggered the review, e.g. L3."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "approved",
+        "rejected",
+        "flagged",
+        "killed"
+      ],
+      "default": "pending"
+    },
+    "reviewer_id": {
+      "type": "string",
+      "description": "User who decided the review."
+    },
+    "decision": {
+      "type": "string",
+      "description": "Human-readable decision / recommended action summary."
+    },
+    "notes": {
+      "type": "string",
+      "description": "Reviewer notes or auto-test summary."
+    },
+    "decided_date": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "verdict": {
+      "type": "object",
+      "description": "Auto-test result from the tribunal + verifier: consensus, confidence, verifier verdict, corrections, recommended action, candidate reference, tested_at."
+    },
+    "candidate_version_id": {
+      "type": "string",
+      "description": "The verified / better answer version prepared by the auto-test, offered for review when the original is contested or rejected."
+    }
+  },
+  "required": [
+    "answer_version_id",
+    "inquiry_id"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "read": null,
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "name": "GroundingDoc",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Document title (e.g. HR Handbook v3)."
+    },
+    "domain": {
+      "type": "string",
+      "description": "Domain this document grounds: general, Medicine, Legal, HR, Finance, Engineering."
+    },
+    "content": {
+      "type": "string",
+      "description": "Authoritative text that claims are checked against. Cap ~8000 chars; use file_url for larger documents."
+    },
+    "file_url": {
+      "type": "string",
+      "description": "Optional uploaded document URL for content larger than the inline limit."
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "source": {
+      "type": "string",
+      "description": "Origin of the document: manual, upload, url."
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

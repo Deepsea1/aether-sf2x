@@ -1,0 +1,92 @@
+{
+  "name": "UserEvent",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "description": "App user this event belongs to \u2014 the acting console user or the API-key owner."
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "inquiry",
+        "verify",
+        "attest",
+        "gate",
+        "review",
+        "correction",
+        "drift",
+        "other"
+      ],
+      "description": "Fine-grained per-user action type for auditing."
+    },
+    "trust_score": {
+      "type": "number",
+      "description": "Trust score at the event, when applicable."
+    },
+    "verdict": {
+      "type": "string",
+      "description": "Outcome: verified / contested / rejected / allow / suppress / escalate / valid / weak / invalid, etc."
+    },
+    "domain": {
+      "type": "string"
+    },
+    "stakes": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string",
+      "description": "Where the action came from: console / api / extension / widget / batch / workflow."
+    },
+    "linked_entity_type": {
+      "type": "string"
+    },
+    "linked_entity_id": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Optional extra context (certified, mode, ids, etc.)."
+    }
+  },
+  "required": [
+    "user_id",
+    "event_type"
+  ],
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "read": {
+      "$or": [
+        {
+          "data.user_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

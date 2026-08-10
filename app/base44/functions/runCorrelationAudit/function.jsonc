@@ -1,0 +1,4 @@
+{
+  "name": "runCorrelationAudit",
+  "entry": "entry.ts"
+}

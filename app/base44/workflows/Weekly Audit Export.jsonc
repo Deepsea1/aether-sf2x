@@ -1,0 +1,45 @@
+{
+  "description": "Every Monday at 2am PT, appends the past week's governance audit decisions and correction events to a permanent Google Sheet archive (deduped by record id, append-only \u2014 never overwrites).",
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "weekly_audit_export",
+      "version": "1.0",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "export": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "weeklyAuditExport",
+            "args": {}
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Append weekly audit archive to Google Sheets",
+            "description": "Permanent, deduped append of the week's governance decisions + correction events"
+          }
+        }
+      }
+    ]
+  },
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 2 * * 1",
+      "one_time_date": null,
+      "timezone": "America/Los_Angeles",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "name": "Weekly Audit Export"
+}

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#070A0F" />
+    <title>Aether by SF2X — Don't Trust. Verify. AI Hallucination Detection</title>
+    <meta name="description" content="Aether catches LLM hallucinations in real time using a 3-model tribunal. Benchmark: 91/100 trustworthiness, AUC 1.0. Chrome extension for ChatGPT, Claude & Gemini." />
+    <meta name="keywords" content="AI hallucination detection, LLM verification, AI trust, tribunal benchmark, hallucination checker, AI safety, Aether, SF2X, AI truth, ChatGPT hallucination checker, Claude verification, Gemini verification" />
+    <meta name="author" content="SF2X" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="googlebot" content="index, follow" />
+    <link rel="canonical" href="/" id="canonical-link" />
+    <meta property="og:site_name" content="Aether by SF2X" />
+    <meta property="og:title" content="Aether by SF2X — Don't Trust. Verify. AI Hallucination Detection" />
+    <meta property="og:description" content="Aether catches LLM hallucinations in real time using a 3-model tribunal. Benchmark: 91/100 trustworthiness, AUC 1.0. Chrome extension for ChatGPT, Claude & Gemini." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://aether.sf2x.ai" id="og-url" />
+    <meta property="og:image" content="/og-image.png" id="og-image" />
+    <meta property="og:logo" content="/logo.svg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@sf2x" />
+    <meta name="twitter:title" content="Aether by SF2X — Don't Trust. Verify. AI Hallucination Detection" />
+    <meta name="twitter:description" content="Aether catches LLM hallucinations in real time using a 3-model tribunal. Benchmark: 91/100 trustworthiness, AUC 1.0. Chrome extension for ChatGPT, Claude & Gemini." />
+    <meta name="twitter:image" content="/og-image.png" />
+    <script type="application/ld+json" id="sf2x-ld"></script>
+    <script>
+      // Resolve the live published domain so canonical/OG/JSON-LD always point at the real site.
+      (function () {
+        var origin = window.location.origin;
+        var href = window.location.href.split('?')[0].split('#')[0];
+        var path = window.location.pathname || '/';
+        var abs = function (p) { return origin + (p || '/'); };
+        try { document.getElementById('canonical-link').setAttribute('href', href); } catch (e) {}
+        try { document.getElementById('og-url').setAttribute('content', origin + '/'); } catch (e) {}
+        try {
+          var logo = abs('/logo.svg');
+          document.getElementById('og-image').setAttribute('content', abs('/og-image.png'));
+          var ld = {
+            "@context": "https://schema.org",
+            "@graph": [
+              {
+                "@type": "Organization",
+                "@id": origin + "/#organization",
+                "name": "Aether by SF2X",
+                "alternateName": "Aether — The Truth Layer for AI",
+                "url": origin + "/",
+                "logo": { "@type": "ImageObject", "url": logo, "width": 512, "height": 512 },
+                "description": "Aether by SF2X is the trust layer for AI — it catches LLM hallucinations in real time using a 3-model tribunal, with verifiable warrant-based provenance.",
+                "sameAs": [
+                  "https://github.com/sf2x",
+                  "https://www.linkedin.com/company/sf2x",
+                  "https://twitter.com/sf2x"
+                ],
+                "slogan": "Don't trust. Verify."
+              },
+              {
+                "@type": "WebSite",
+                "@id": origin + "/#website",
+                "url": origin + "/",
+                "name": "Aether by SF2X",
+                "publisher": { "@id": origin + "/#organization" },
+                "description": "The trust layer for AI — real-time LLM hallucination detection via a 3-model tribunal.",
+                "inLanguage": "en"
+              },
+              {
+                "@type": "SoftwareApplication",
+                "name": "Aether by SF2X",
+                "applicationCategory": "BusinessApplication",
+                "operatingSystem": "Web",
+                "url": origin + "/",
+                "developer": { "@id": origin + "/#organization" },
+                "description": "Aether by SF2X is the trust layer for AI. It catches LLM hallucinations in real time using a 3-model tribunal (proposer, critic, verifier) with verifiable warrant-based provenance. Benchmark: 91/100 trustworthiness, AUC 1.0. Chrome extension for ChatGPT, Claude & Gemini.",
+                "offers": [
+                  { "@type": "Offer", "name": "Starter", "price": "0", "priceCurrency": "USD", "url": origin + "/pricing" },
+                  { "@type": "Offer", "name": "Pro", "price": "399.00", "priceCurrency": "USD", "url": origin + "/pricing" },
+                  { "@type": "Offer", "name": "Enterprise", "price": "1999.00", "priceCurrency": "USD", "url": origin + "/pricing" },
+                  { "@type": "Offer", "name": "Scale", "price": "9999.00", "priceCurrency": "USD", "url": origin + "/pricing" }
+                ],
+                "featureList": [
+                  "Decision warrants for every AI answer",
+                  "Auditable truth lineage and provenance",
+                  "Measurable epistemic health scores",
+                  "Multi-agent tribunal debate for verification",
+                  "Governance gates (L0-L4) with human escalation",
+                  "Public AI model benchmark leaderboard (Bench)",
+                  "Embeddable trust badges",
+                  "Correction economy with mean-time-to-correction"
+                ],
+                "screenshot": abs('/og-image.png')
+              },
+              {
+                "@type": "BreadcrumbList",
+                "itemListElement": [
+                  { "@type": "ListItem", "position": 1, "name": "SF2X", "item": origin + "/" },
+                  { "@type": "ListItem", "position": 2, "name": "AETHER", "item": origin + "/" },
+                  { "@type": "ListItem", "position": 3, "name": "Bench Leaderboard", "item": origin + "/leaderboard" },
+                  { "@type": "ListItem", "position": 4, "name": "Verify an Answer", "item": origin + "/verify" }
+                ]
+              },
+              {
+                "@type": "FAQPage",
+                "mainEntity": [
+                  {
+                    "@type": "Question",
+                    "name": "What is SF2X?",
+                    "acceptedAnswer": { "@type": "Answer", "text": "SF2X is the label of AI truth and provenance. It produces AETHER, an epistemic operating system that eliminates AI hallucinations by attaching a decision warrant, an auditable truth lineage, and a measurable epistemic health score to every AI answer." }
+                  },
+                  {
+                    "@type": "Question",
+                    "name": "What is AETHER?",
+                    "acceptedAnswer": { "@type": "Answer", "text": "AETHER by SF2X is the epistemic operating system for high-stakes AI deployments. It provides warranted answers, provenance lineages, correction tracking, multi-agent tribunal debate, governance gates, and a public model benchmark leaderboard." }
+                  },
+                  {
+                    "@type": "Question",
+                    "name": "How does SF2X verify AI answers?",
+                    "acceptedAnswer": { "@type": "Answer", "text": "Every answer is backed by a decision warrant (explicit premises, conclusion, confidence, and sources), verified through a multi-agent proposer-critic-verifier tribunal, and scored with an epistemic health score. Any answer can be independently verified via a public verify link and trust badge." }
+                  },
+                  {
+                    "@type": "Question",
+                    "name": "Which AI models can I trust?",
+                    "acceptedAnswer": { "@type": "Answer", "text": "SF2X runs a daily public model benchmark (Bench) that tests major AI models on pressing questions and ranks them by verifier-judged correctness, warrant validity, latency, and trust score. See the live leaderboard at /leaderboard." }
+                  },
+                  {
+                    "@type": "Question",
+                    "name": "What is an epistemic health score?",
+                    "acceptedAnswer": { "@type": "Answer", "text": "An epistemic health score is a composite measure of an AI system's trustworthy answer rate, warrant validity, calibration, correction rate, mean-time-to-correction, and drift. It quantifies how much you can trust an AI system's outputs." }
+                  }
+                ]
+              }
+            ]
+          };
+          document.getElementById('sf2x-ld').textContent = JSON.stringify(ld);
+        } catch (e) {}
+      })();
+    </script>
+    <script>
+      // Auto-detect system dark/light preference and toggle the .dark token class.
+      (function () {
+        var mq = window.matchMedia('(prefers-color-scheme: dark)');
+        function apply() {
+          var dark = mq.matches;
+          document.documentElement.classList.toggle('dark', dark);
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', dark ? '#070A0F' : '#ffffff');
+        }
+        apply();
+        try { mq.addEventListener('change', apply); } catch (e) { mq.addListener(apply); }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

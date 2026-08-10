@@ -1,0 +1,122 @@
+{
+  "name": "AnswerVersion",
+  "type": "object",
+  "properties": {
+    "inquiry_id": {
+      "type": "string",
+      "description": "Reference to the parent Inquiry."
+    },
+    "version": {
+      "type": "number",
+      "description": "Sequential version number within an inquiry."
+    },
+    "answer_text": {
+      "type": "string",
+      "description": "The warranted answer text."
+    },
+    "cognitive_state": {
+      "type": "object",
+      "description": "CognitiveState snapshot: working memory, self-model, reasoning trace."
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Epistemic metric snapshot (CE, ECE, UCR, FRR, CR, MTTC, EDS)."
+    },
+    "warrant_id": {
+      "type": "string",
+      "description": "Reference to the Decision Validity Warrant."
+    },
+    "trust_score": {
+      "type": "number",
+      "description": "Computed trustworthy answer rate 0-100 at creation, used for escalation triggers."
+    },
+    "stakes_level": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "description": "Denormalized parent inquiry stakes, used for escalation triggers."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "Optional free-text description."
+    }
+  },
+  "required": [
+    "inquiry_id",
+    "answer_text"
+  ],
+  // RLS SCOPE — read this before "reconciling" these rules with the public /verify pages.
+  //
+  // These rules govern DIRECT client entity access only (get/filter through the user-scoped
+  // SDK client — e.g. src/pages/Lineage.jsx, Home.jsx, Collective.jsx). They are load-bearing:
+  // without them any client could filter() and bulk-export every tenant's answer_text.
+  //
+  // They do NOT govern the service-role function paths, which deliberately publish a CURATED
+  // FIELD SUBSET for a single already-known id: verifyAnswer (public, unauthenticated — backs
+  // /verify/:id, Registry, WarrantProof, Badge, EmbedBadge) and gateApi (api-key). Publicly
+  // verifiable warrants are the product; that exposure is intentional design, not a leak.
+  //
+  // So the apparent contradiction between "creator-only" here and those public pages is real
+  // but correct — the two govern different access paths. Resolve it in NEITHER direction:
+  //   - Do NOT loosen these rules to "match" the public pages. Those serve id-lookup of a
+  //     field subset; these gate enumeration of everything. Loosening turns lookup into export.
+  //   - Do NOT ownership-gate those functions on created_by_id. Records created through the
+  //     service-role API paths (shared/attest.js, functions/inquire) do NOT carry the API
+  //     caller in created_by_id — no creation path in this repo sets it. Inquiry.customer_id
+  //     is the owner field for those lineages. A created_by_id gate 404s paying customers.
+  "rls": {
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "read": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    }
+  }
+}

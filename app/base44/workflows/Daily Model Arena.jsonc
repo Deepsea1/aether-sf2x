@@ -1,0 +1,87 @@
+{
+  "description": "Every day at 9am PT, generate the most pressing AI/tech question of the day and run the top model from each frontier company (8 models, capped for credit efficiency) against it \u2014 verifier-judged correctness is logged to ModelBenchRun, the daily result is emailed to admins, and the day's runs are appended to a Google Sheet for long-term trend tracking.",
+  "definition": {
+    "document": {
+      "dsl": "1.0.0",
+      "name": "daily_model_arena",
+      "version": "1.3",
+      "namespace": "base44"
+    },
+    "do": [
+      {
+        "run_arena": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "runModelBench",
+            "args": {
+              "run_type": "daily",
+              "models": [
+                "gpt_5_6_sol",
+                "gemini_3_1_pro",
+                "claude_opus_4_8",
+                "or_grok_4",
+                "or_llama_33_70b",
+                "or_mistral_large",
+                "or_deepseek_v3",
+                "or_qwen_25_72b"
+              ]
+            }
+          },
+          "then": "post_result",
+          "x-base44": {
+            "title": "Run top models on question of the day",
+            "description": "Generate QoD, test the top model from each frontier company (8 models), verify, log to ModelBenchRun"
+          }
+        }
+      },
+      {
+        "post_result": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "postDailyArenaResult",
+            "args": {}
+          },
+          "then": "export_sheet",
+          "x-base44": {
+            "title": "Post daily arena result",
+            "description": "Email admins the ranked winners and log an audit event"
+          }
+        }
+      },
+      {
+        "export_sheet": {
+          "call": "invoke_backend_function",
+          "with": {
+            "function_name": "exportBenchToSheets",
+            "args": {
+              "run_type": "daily"
+            }
+          },
+          "then": "end",
+          "x-base44": {
+            "title": "Append daily runs to Google Sheet",
+            "description": "Idempotently append the day's bench runs to the trend spreadsheet"
+          }
+        }
+      }
+    ]
+  },
+  "trigger": {
+    "condition": null,
+    "config": {
+      "trigger_type": "scheduled",
+      "events": [],
+      "schedule_mode": "recurring",
+      "cron_expression": "0 9 * * *",
+      "one_time_date": null,
+      "timezone": "America/Los_Angeles",
+      "interval_value": null,
+      "interval_unit": null,
+      "interval_anchor": null,
+      "ends_type": "never",
+      "ends_on_date": null,
+      "ends_after_count": null
+    }
+  },
+  "name": "Daily Model Arena"
+}
