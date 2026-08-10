@@ -16,9 +16,15 @@
 //       - unsupported
 //
 // v2 (MASTER_PLAN v5 §11.3) is additive: a file is v2 when it says `version: 2`
-// (or higher) or uses any v2 top-level key. A file without any v2 marker parses
-// exactly as it always has — v1 behavior is regression-critical and preserved
-// byte-for-byte, shipped quirks included. v2 adds:
+// (or higher) or uses any v2 top-level key. v1 files parse as they always have
+// EXCEPT two shipped parser bugs fixed 2026-08-10 with owner approval: the last
+// rule before a following top-level key is no longer dropped, and a sibling
+// `require_review_on:` after an open block_on list is no longer swallowed into
+// block_on as a literal value (its entries now require review instead of
+// blocking, as the policy author intended). Note: v1 policies that hit either
+// bug now produce a different computePolicyHash — Policy dedupe re-persists
+// once and the wedge's verdict-reuse cache invalidates once (safe
+// over-invalidation, by design). v2 adds:
 //
 //   domain_pack: technical-docs@1.0
 //   mode: advisory | enforcing          # absent on a v2 file = advisory
@@ -239,13 +245,13 @@ export function parsePolicyYaml(yamlText, { policy_id = null, source_repo = null
 
     // Top-level keys.
     if (indent === 0) {
-      // v2 finalizes pending entries before switching sections; v1 keeps its
-      // shipped behavior (a pending rule is dropped here) byte-for-byte.
-      if (isV2) {
-        if (currentRule) policy.rules.push(currentRule);
-        if (currentFloor) policy.materiality_rules.floors.push(finalizeFloor(currentFloor));
-        if (currentAllowed) policy.sources.allowed.push(finalizeAllowedSource(currentAllowed));
-      }
+      // Finalize pending entries before switching sections. (Fixed 2026-08-10,
+      // owner-approved: v1 previously dropped a pending rule at this boundary —
+      // the last rule before a following top-level key silently vanished, e.g.
+      // the wedge default policy's legal_claim rule never applied.)
+      if (currentRule) policy.rules.push(currentRule);
+      if (currentFloor) policy.materiality_rules.floors.push(finalizeFloor(currentFloor));
+      if (currentAllowed) policy.sources.allowed.push(finalizeAllowedSource(currentAllowed));
       currentSection = null;
       currentRule = null;
       currentFloor = null;
@@ -340,10 +346,12 @@ export function parsePolicyYaml(yamlText, { policy_id = null, source_repo = null
         policy.release_gate.overrides = policy.release_gate.overrides || {};
       }
     } else if (currentSection === 'release_gate_block_on' || currentSection === 'release_gate_review_on') {
-      // v2 fixes the v1 quirk where a sibling key (e.g. `require_review_on:`)
-      // was swallowed into the open list as a value; v1 keeps that shipped
-      // behavior byte-for-byte.
-      if (isV2 && !content.startsWith('-')) {
+      // A non-list line while a list is open is a sibling key, not a value.
+      // (Fixed 2026-08-10, owner-approved: v1 previously swallowed a sibling
+      // `require_review_on:` into the open block_on list as a literal value,
+      // so its entries — e.g. mixed / supported_with_limits — BLOCKED instead
+      // of requiring review.)
+      if (!content.startsWith('-')) {
         currentSection = 'release_gate';
         i--; // reprocess this line as release_gate content
         continue;
