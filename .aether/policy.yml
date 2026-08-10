@@ -1,0 +1,63 @@
+# .aether/policy.yml — Aether's own verification policy (dogfooding, MASTER_PLAN v5 §19.6).
+#
+# Aether verifies Aether: the CI wedge (githubPrVerify) loads this file for PRs
+# against this repository, so the claims in our own README and docs go through
+# the same gate we sell. The post-deploy "fix endpoint docs" commit is the
+# standing proof this failure class is real.
+#
+# Parsed by app/base44/shared/policyParser.js (policy v2 — plan §11.3).
+# The pack this policy instantiates is documented in docs/packs/technical-docs-1.0.md.
+
+version: 2
+domain_pack: technical-docs@1.0
+
+# Advisory until the enforcing gate earns a measured false-block rate (§18.2):
+# findings are reported on the PR and in the run output, but the commit status
+# stays green. Flipping this to `enforcing` is a policy change (§11.4), not an
+# edit-and-merge.
+mode: advisory
+
+scope:
+  # Documentation claims only — code is reviewed by humans and CI; docs rot silently.
+  include: ["README.md", "docs/**/*.md"]
+  ignore: ["docs/archive/**"]
+  changed_files_only: true       # delta verification — only what the PR touched (§7.2)
+  max_claims_per_run: 200        # cost cap; overage degrades the run to advisory + a note, never silent truncation
+
+materiality_rules:
+  floors:                        # deterministic floors (§6.2) — floors only ever RAISE materiality
+    - match: "SECURITY.md"
+      min_materiality: high
+    - match: "docs/api/**"
+      min_materiality: high      # API claims are load-bearing for integrators
+    - match: "docs/API_REFERENCE.md"
+      min_materiality: high      # this repo's actual API surface doc
+    - pattern: "(guarantee|always|never|all versions|unlimited|100%)"
+      min_materiality: high      # absolute language is where docs lie hardest
+
+sources:
+  allowed:
+    - repo: "github.com/Deepsea1/aether-sf2x/*"  # our own tree — tier 0 for claims about Aether
+    - host: "docs.base44.com"                    # platform we run on
+    - host: "developer.mozilla.org"              # web platform reference
+  freshness_days:                # per source class — a pinned spec doesn't rot on a clock (§11.3)
+    versioned_spec: 3650
+    release_notes: 730
+    vendor_documentation: 180
+    news_or_secondary: 90
+
+review_sla:                      # §12.5 — review_required is never a black hole
+  high:     { hours: 72, on_timeout: advisory }
+  critical: { hours: 72, on_timeout: remain_blocked }
+
+verdict_reuse:
+  enabled: true                  # unchanged claims reuse verdicts on re-push (§7.2)
+  respect_freshness: true
+
+release_gate:
+  block_on:                      # takes effect when mode flips to enforcing;
+    - contradicted               # in advisory mode these downgrade to review + a reason
+    - unsupported
+  review_on:
+    - mixed
+    - supported_with_limits
