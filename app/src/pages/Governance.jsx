@@ -7,6 +7,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import StatCard from '@/components/sf2x/StatCard';
 import EpistemicTrendChart from '@/components/sf2x/EpistemicTrendChart';
 import ReviewRow from '@/components/sf2x/ReviewRow';
+import GateReviewQueue from '@/components/sf2x/GateReviewQueue';
 import AuditExplorer from '@/components/sf2x/AuditExplorer';
 import { computeTrustworthyRate } from '@/lib/sf2x';
 import { clusterReviews, CASE_RUBRIC } from '@/lib/sf2xReview';
@@ -85,7 +86,10 @@ export function GovernanceContent() {
       const vMap = new Map(versions.map((v) => [v.id, v]));
       const iMap = new Map(inquiries.map((i) => [i.id, i]));
       const wMap = new Map(warrants.map((w) => [w.id, w]));
-      const rows = reviews.map((rv) => {
+      // Gate reviews (review_type 'gate') have no answer version or inquiry —
+      // they live in their own queue below and must never enter the answer
+      // review flow (clustering, auto-test, duplicate merge).
+      const rows = reviews.filter((rv) => rv.review_type !== 'gate').map((rv) => {
         const version = vMap.get(rv.answer_version_id) || null;
         const warrant = wMap.get(version?.warrant_id) || null;
         const inquiry = iMap.get(rv.inquiry_id) || null;
@@ -391,6 +395,10 @@ export function GovernanceContent() {
               />
             </TabsContent>
           </Tabs>
+
+          <div className="rounded-2xl border border-white/10 bg-[#0B0F16] p-5">
+            <GateReviewQueue />
+          </div>
         </div>
 
         <div>
