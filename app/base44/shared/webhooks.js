@@ -3,7 +3,8 @@
 // a review opens, a verification rejects). Supports Slack incoming webhooks,
 // PagerDuty Events API v2, and raw JSON custom endpoints. Called from gateApi
 // (and any other producer) after the decision is made; failures never block the
-// originating request.
+// originating request. Also exports the SSRF guard (validateWebhookUrl +
+// guardedPost) for endpoints that POST to caller-supplied URLs (webhookVerify).
 
 const EVENTS = ['gate.suppress', 'gate.escalate', 'drift.alert', 'review.opened', 'verify.rejected'];
 
@@ -68,13 +69,40 @@ async function isBlockedHost(host) {
   }
 }
 
-async function validateWebhookUrl(raw) {
+export async function validateWebhookUrl(raw) {
   let u;
   try { u = new URL(raw); } catch { return { ok: false, error: 'invalid URL' }; }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, error: 'non-http(s) protocol' };
   if (u.username || u.password) return { ok: false, error: 'credentials embedded in URL' };
   if (await isBlockedHost(u.hostname)) return { ok: false, error: 'blocked host (private/internal/metadata)' };
   return { ok: true };
+}
+
+// guardedPost — the SSRF-guarded outbound POST every webhook-style delivery goes
+// through. Validates the target before any request is made, then never lets
+// fetch() auto-follow redirects — an attacker could 302 to an internal/metadata
+// endpoint that bypassed validateWebhookUrl. Redirects are followed manually,
+// re-validating every Location target against the same private-host blocklist,
+// capped at 5 hops. Returns { ok: true, status } with the final response status,
+// or { ok: false, error, stage } where stage is 'validate' (initial URL
+// rejected), 'redirect' (a redirect target rejected), or 'redirect_cap' (too
+// many redirects). Network errors propagate to the caller.
+export async function guardedPost(url, headers, body) {
+  const check = await validateWebhookUrl(url);
+  if (!check.ok) return { ok: false, error: check.error, stage: 'validate' };
+  let target = url;
+  for (let hop = 0; hop < 5; hop++) {
+    const res = await fetch(target, { method: 'POST', headers, body, redirect: 'manual' });
+    if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+      const next = new URL(res.headers.get('location'), target).href;
+      const rc = await validateWebhookUrl(next);
+      if (!rc.ok) return { ok: false, error: rc.error, stage: 'redirect' };
+      target = next;
+      continue;
+    }
+    return { ok: true, status: res.status };
+  }
+  return { ok: false, error: 'too many redirects', stage: 'redirect_cap' };
 }
 
 async function deliver(h, event, payload) {
@@ -97,24 +125,12 @@ async function deliver(h, event, payload) {
   } else {
     body = JSON.stringify({ event, payload, sent_at: new Date().toISOString() });
   }
-  const check = await validateWebhookUrl(h.url);
-  if (!check.ok) { console.warn(`webhook delivery skipped (${h.label || h.id}): ${check.error}`); return; }
-  // SSRF: never let fetch() auto-follow redirects — an attacker could 302 to an
-  // internal/metadata endpoint that bypassed validateWebhookUrl. Follow manually,
-  // re-validating every redirect target against the same private-host blocklist.
-  let target = h.url;
-  for (let hop = 0; hop < 5; hop++) {
-    const res = await fetch(target, { method: 'POST', headers, body, redirect: 'manual' });
-    if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
-      const next = new URL(res.headers.get('location'), target).href;
-      const rc = await validateWebhookUrl(next);
-      if (!rc.ok) { console.warn(`webhook redirect blocked (${h.label || h.id}): ${rc.error}`); return; }
-      target = next;
-      continue;
-    }
-    return;
+  const sent = await guardedPost(h.url, headers, body);
+  if (!sent.ok) {
+    if (sent.stage === 'validate') console.warn(`webhook delivery skipped (${h.label || h.id}): ${sent.error}`);
+    else if (sent.stage === 'redirect') console.warn(`webhook redirect blocked (${h.label || h.id}): ${sent.error}`);
+    else console.warn(`webhook delivery aborted (${h.label || h.id}): ${sent.error}`);
   }
-  console.warn(`webhook delivery aborted (${h.label || h.id}): too many redirects`);
 }
 
 export async function fireWebhooks(svc, event, payload, ownerId) {
