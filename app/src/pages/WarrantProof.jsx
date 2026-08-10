@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ShieldCheck, ShieldAlert, ShieldQuestion, Loader2, Search, Link2, Check, Fingerprint, Scale } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, ShieldQuestion, Loader2, Search, Link2, Check, Fingerprint, Scale, Hash } from 'lucide-react';
 import AppShell from '@/components/sf2x/AppShell';
 import { base44 } from '@/api/base44Client';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,9 @@ import { Input } from '@/components/ui/input';
 
 function schemeBadge(v) {
   if (!v) return null;
+  if (v.signature_scheme === 'Ed25519-JCS-v2') {
+    return { label: 'Ed25519 · RFC 8785 canonical', cls: 'text-emerald-300 border-emerald-400/30 bg-emerald-400/10' };
+  }
   if (v.signature_scheme === 'Ed25519') {
     return { label: 'Ed25519 — publicly verifiable', cls: 'text-emerald-300 border-emerald-400/30 bg-emerald-400/10' };
   }
@@ -22,6 +25,49 @@ function schemeBadge(v) {
     return { label: 'HMAC — server-attested (legacy)', cls: 'text-amber-300 border-amber-400/30 bg-amber-400/10' };
   }
   return { label: `${v.signature_scheme || 'unknown'} — legacy seal`, cls: 'text-slate-300 border-white/20 bg-white/5' };
+}
+
+// Client-side RFC 6962 inclusion check — recomputes leaf → root with WebCrypto
+// only, so "this warrant is in the log" is verified in YOUR browser, not taken
+// on the server's word. Mirrors shared/merkle.js (RFC6962-SHA256): leaf hash =
+// SHA-256(0x00 || leaf bytes), node hash = SHA-256(0x01 || left || right); the
+// fold follows RFC 9162 §2.1.3.2. Any malformed input resolves to unverified.
+async function verifyInclusionInBrowser(proof, expectedRoot, leafSource) {
+  const toHex = (bytes) => [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const fromHex = (h) => Uint8Array.from(String(h || '').match(/.{2}/g) || [], (pair) => parseInt(pair, 16));
+  const sha = async (bytes) => new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  const concat = (...parts) => {
+    const out = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+    let offset = 0;
+    for (const part of parts) { out.set(part, offset); offset += part.length; }
+    return out;
+  };
+  const leaf = await sha(concat(Uint8Array.of(0x00), new TextEncoder().encode(String(leafSource || ''))));
+  const leafMatches = toHex(leaf) === String(proof.leaf_hash || '');
+  const treeSize = Number(proof.tree_size);
+  let fn = Number(proof.index);
+  if (!Number.isInteger(fn) || !Number.isInteger(treeSize) || fn < 0 || fn >= treeSize) {
+    return { verified: false, leafMatches, rootMatches: false };
+  }
+  let sn = treeSize - 1;
+  let node = leaf;
+  for (const sibling of proof.siblings || []) {
+    if (sn === 0) return { verified: false, leafMatches, rootMatches: false };
+    const p = fromHex(sibling);
+    if (p.length !== 32) return { verified: false, leafMatches, rootMatches: false };
+    if ((fn & 1) === 1 || fn === sn) {
+      node = await sha(concat(Uint8Array.of(0x01), p, node));
+      if ((fn & 1) === 0) {
+        while (fn !== 0 && (fn & 1) === 0) { fn >>= 1; sn >>= 1; }
+      }
+    } else {
+      node = await sha(concat(Uint8Array.of(0x01), node, p));
+    }
+    fn >>= 1;
+    sn >>= 1;
+  }
+  const rootMatches = sn === 0 && toHex(node) === String(expectedRoot || '').toLowerCase();
+  return { verified: leafMatches && rootMatches, leafMatches, rootMatches };
 }
 
 function ConfidenceBar({ value }) {
@@ -44,6 +90,7 @@ export default function WarrantProof() {
   const [result, setResult] = useState(null);
   const [err, setErr] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [proofCheck, setProofCheck] = useState(null);
 
   const lookup = async (value) => {
     const needle = String(value || '').trim();
@@ -60,7 +107,7 @@ export default function WarrantProof() {
       if (!v) {
         setErr('No warrant found for that id or hash. The registry is honest about its gaps — this is a true miss, not a hidden answer.');
       } else {
-        setResult({ v, root: data.root, count: data.count });
+        setResult({ v, root: data.root, count: data.count, merkle_root: data.merkle_root, tree_size: data.tree_size });
         setSearchParams({ q: needle }, { replace: true });
       }
     } catch (e) {
@@ -75,6 +122,22 @@ export default function WarrantProof() {
     if (initial) lookup(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-run the in-browser inclusion check whenever a new proof arrives. Older
+  // registry responses carry no proof — the card simply doesn't render.
+  useEffect(() => {
+    const proof = result?.v?.inclusion_proof;
+    const merkleRoot = result?.merkle_root;
+    if (!proof || !merkleRoot) { setProofCheck(null); return; }
+    let cancelled = false;
+    setProofCheck({ pending: true });
+    // The leaf is the warrant's signed hash (falling back to its id) — the
+    // exact leaf material the registry commits to merkle_root.
+    verifyInclusionInBrowser(proof, merkleRoot, result.v.signed_hash || result.v.warrant_id)
+      .then((check) => { if (!cancelled) setProofCheck(check); })
+      .catch(() => { if (!cancelled) setProofCheck({ verified: false, leafMatches: false, rootMatches: false }); });
+    return () => { cancelled = true; };
+  }, [result]);
 
   const share = async () => {
     const url = `${window.location.origin}/warrant-proof?q=${encodeURIComponent(q.trim())}`;
@@ -206,6 +269,18 @@ export default function WarrantProof() {
                   <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Issued</div>
                   <div className="text-slate-300 mt-0.5">{v.created_date ? String(v.created_date).slice(0, 19).replace('T', ' ') : '—'}</div>
                 </div>
+                {v.key_id && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Signing key</div>
+                    <div className="font-mono text-slate-300 break-all mt-0.5">{v.key_id}</div>
+                  </div>
+                )}
+                {v.payload_hash_v2 && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Canonical payload hash</div>
+                    <div className="font-mono text-slate-300 break-all mt-0.5">{v.payload_hash_v2}</div>
+                  </div>
+                )}
               </div>
               {(v.verifier_lineage || []).length > 0 && (
                 <div className="mt-4 pt-4 border-t border-white/10">
@@ -226,6 +301,39 @@ export default function WarrantProof() {
                 </div>
               )}
             </div>
+
+            {v.inclusion_proof && result?.merkle_root && (
+              <div className="rounded-2xl border border-white/10 bg-[#0B0F16] p-5 mb-6">
+                <div className="text-sm font-medium text-white mb-3 flex items-center gap-2"><Hash className="h-4 w-4" /> Transparency proof</div>
+                {proofCheck?.pending ? (
+                  <div className="flex items-center gap-2 text-sm text-slate-400">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Recomputing the Merkle path in your browser…
+                  </div>
+                ) : proofCheck?.verified ? (
+                  <div className="flex items-center gap-2 text-sm text-emerald-300">
+                    <ShieldCheck className="h-4 w-4" /> Inclusion proof verified in your browser — this warrant is in the log.
+                  </div>
+                ) : proofCheck ? (
+                  <div className="flex items-center gap-2 text-sm text-rose-300">
+                    <ShieldAlert className="h-4 w-4" /> Proof mismatch — the recomputed {proofCheck.leafMatches ? 'root' : 'leaf'} does not match. Do not trust this inclusion claim.
+                  </div>
+                ) : null}
+                <div className="mt-4 grid sm:grid-cols-2 gap-3 text-[12px]">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Merkle root ({result.tree_size} leaves)</div>
+                    <div className="font-mono text-slate-300 break-all mt-0.5">{result.merkle_root}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Leaf {v.inclusion_proof.index} · {(v.inclusion_proof.siblings || []).length} siblings · {v.inclusion_proof.algorithm}</div>
+                    <div className="font-mono text-slate-300 break-all mt-0.5">{v.inclusion_proof.leaf_hash}</div>
+                  </div>
+                </div>
+                <div className="mt-4 pt-4 border-t border-white/10 text-[12px] text-slate-400">
+                  Your browser hashed the warrant's leaf through the proof's sibling path (RFC 6962, SHA-256 via
+                  WebCrypto) and compared the result to the published Merkle root — no server involved in the check.
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
