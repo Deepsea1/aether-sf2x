@@ -264,18 +264,7 @@
     "conclusion"
   ],
   "rls": {
-    "create": {
-      "$or": [
-        {
-          "created_by_id": "{{user.id}}"
-        },
-        {
-          "user_condition": {
-            "role": "admin"
-          }
-        }
-      ]
-    },
+    "create": true,
     "read": {
       "$or": [
         {
@@ -288,18 +277,7 @@
         }
       ]
     },
-    "update": {
-      "$or": [
-        {
-          "created_by_id": "{{user.id}}"
-        },
-        {
-          "user_condition": {
-            "role": "admin"
-          }
-        }
-      ]
-    },
+    "update": true,
     "delete": {
       "$or": [
         {
