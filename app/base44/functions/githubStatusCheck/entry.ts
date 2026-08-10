@@ -18,6 +18,11 @@ export default async function (req) {
       return Response.json({ error: 'owner, repo, and sha are required' }, { status: 400 });
     }
 
+    const invalidPathField = validateGithubPathParams({ owner, repo, sha });
+    if (invalidPathField) {
+      return Response.json({ error: `${invalidPathField} is invalid` }, { status: 400 });
+    }
+
     if (trust_score == null) {
       return Response.json({ error: 'trust_score is required' }, { status: 400 });
     }
@@ -75,4 +80,20 @@ export default async function (req) {
     console.error('githubStatusCheck error:', error);
     return Response.json({ error: error.message }, { status: 500 });
   }
+}
+
+// ---- Helpers ----
+
+// owner/repo/sha are interpolated into api.github.com URLs with the connector
+// token attached — validate them strictly so a crafted value cannot retarget
+// the request at a different API endpoint. Returns the first invalid field
+// name, or null when all parts are valid.
+const GITHUB_NAME_RE = /^[A-Za-z0-9_.-]+$/;
+const GITHUB_SHA_RE = /^[0-9a-fA-F]{7,40}$/;
+
+function validateGithubPathParams({ owner, repo, sha }) {
+  if (!GITHUB_NAME_RE.test(owner) || owner === '.' || owner === '..') return 'owner';
+  if (!GITHUB_NAME_RE.test(repo) || repo === '.' || repo === '..') return 'repo';
+  if (!GITHUB_SHA_RE.test(sha)) return 'sha';
+  return null;
 }

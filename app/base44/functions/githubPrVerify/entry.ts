@@ -57,6 +57,11 @@ export default async function(req) {
       return Response.json({ error: 'owner, repo, and head_sha are required' }, { status: 400 });
     }
 
+    const invalidPathField = validateGithubPathParams({ owner, repo, head_sha, pull_number });
+    if (invalidPathField) {
+      return Response.json({ error: `${invalidPathField} is invalid` }, { status: 400 });
+    }
+
     const traceId = newTraceId();
     const svc = base44.asServiceRole;
     const tenant_id = user.id;
@@ -345,6 +350,25 @@ export default async function(req) {
 }
 
 // ---- Helpers ----
+
+// owner/repo/head_sha/pull_number are interpolated into api.github.com URLs
+// with the connector token attached — validate them strictly so a crafted
+// value cannot retarget the request at a different API endpoint. Returns the
+// first invalid field name, or null when all parts are valid. pull_number is
+// optional but must coerce to a positive integer when supplied.
+const GITHUB_NAME_RE = /^[A-Za-z0-9_.-]+$/;
+const GITHUB_SHA_RE = /^[0-9a-fA-F]{7,40}$/;
+
+function validateGithubPathParams({ owner, repo, head_sha, pull_number }) {
+  if (!GITHUB_NAME_RE.test(owner) || owner === '.' || owner === '..') return 'owner';
+  if (!GITHUB_NAME_RE.test(repo) || repo === '.' || repo === '..') return 'repo';
+  if (!GITHUB_SHA_RE.test(head_sha)) return 'head_sha';
+  if (pull_number != null) {
+    const n = Number(pull_number);
+    if (!Number.isInteger(n) || n <= 0) return 'pull_number';
+  }
+  return null;
+}
 
 // Post a PR review with inline line-level annotations for blocked/review claims.
 // Requires pulls:write scope — gracefully degrades to a no-op when the connector
