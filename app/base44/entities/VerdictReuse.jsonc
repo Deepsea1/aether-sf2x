@@ -43,8 +43,6 @@
     "payload"
   ],
   "rls": {
-    "create": null,
-    "read": null,
     "update": {
       "user_condition": {
         "role": "admin"

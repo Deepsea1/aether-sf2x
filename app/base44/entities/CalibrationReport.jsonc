@@ -118,7 +118,6 @@
         "role": "admin"
       }
     },
-    "read": null,
     "update": {
       "user_condition": {
         "role": "admin"

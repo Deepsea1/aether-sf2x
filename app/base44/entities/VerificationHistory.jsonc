@@ -35,7 +35,6 @@
     "verdict"
   ],
   "rls": {
-    "create": null,
     "read": {
       "$or": [
         {
