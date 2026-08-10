@@ -624,3 +624,8 @@ export async function attestAnswer(svc, opts) {
     verify_url: origin ? `${origin}/verify/${av.id}` : `/verify/${av.id}`,
   };
 }
+
+// P3 wedge (Mission A): re-export the SSRF guard + validated fetcher so the
+// GitHub PR wedge grounds cited URLs through the SAME machinery as warrant
+// evidence preservation. Export-only addition — internals unchanged.
+export { assertSafeSourceUrl, safeFetchValidated };

@@ -34,6 +34,17 @@ const SEVERITY_COLORS = {
   block: 'text-red-400 border-red-400/20',
 };
 
+const DISPOSITION_COLORS = {
+  verified_for_stated_use: 'text-emerald-400 border-emerald-400/30 bg-emerald-400/5',
+  supported_with_limits: 'text-emerald-300 border-emerald-300/30 bg-emerald-300/5',
+  needs_review: 'text-amber-400 border-amber-400/30 bg-amber-400/5',
+  contradicted: 'text-amber-500 border-amber-500/30 bg-amber-500/5',
+  blocked: 'text-red-400 border-red-400/30 bg-red-400/5',
+  not_supported: 'text-slate-400 border-slate-400/30 bg-slate-400/5',
+  out_of_scope: 'text-slate-400 border-slate-400/30 bg-slate-400/5',
+  unknown: 'text-slate-400 border-slate-400/30 bg-slate-400/5',
+};
+
 function ClaimRow({ claim, index }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -58,23 +69,49 @@ function ClaimRow({ claim, index }) {
             <span className={`text-[10px] uppercase tracking-wide font-medium ${POLICY_COLORS[claim.policy_decision] || 'text-slate-400'}`}>
               policy: {claim.policy_decision?.replace(/_/g, ' ')}
             </span>
+            {claim.disposition && (
+              <span className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border ${DISPOSITION_COLORS[claim.disposition] || DISPOSITION_COLORS.unknown}`}>
+                {claim.disposition.replace(/_/g, ' ')}
+              </span>
+            )}
             {claim.reused && <span className="text-[10px] uppercase tracking-wide text-sky-400/80">reused</span>}
           </div>
         </div>
       </button>
-      {expanded && claim.flash_signals && claim.flash_signals.length > 0 && (
+      {expanded && ((claim.flash_signals && claim.flash_signals.length > 0) || (claim.evidence && claim.evidence.length > 0)) && (
         <div className="border-t border-white/10 px-4 py-3 space-y-2 bg-black/20">
-          <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500 mb-1">Flash Signals</div>
-          {claim.flash_signals.map((sig, i) => (
-            <div key={i} className={`flex items-start gap-2 text-xs border rounded px-2 py-1.5 ${SEVERITY_COLORS[sig.severity] || SEVERITY_COLORS.warn}`}>
-              <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
-              <div>
-                <span className="font-medium uppercase tracking-wide">{sig.category.replace(/_/g, ' ')}</span>
-                <span className="text-slate-400 ml-1">· {sig.severity}</span>
-                <p className="text-slate-400 mt-0.5 leading-relaxed">{sig.detail}</p>
-              </div>
-            </div>
-          ))}
+          {claim.flash_signals && claim.flash_signals.length > 0 && (
+            <>
+              <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500 mb-1">Flash Signals</div>
+              {claim.flash_signals.map((sig, i) => (
+                <div key={i} className={`flex items-start gap-2 text-xs border rounded px-2 py-1.5 ${SEVERITY_COLORS[sig.severity] || SEVERITY_COLORS.warn}`}>
+                  <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+                  <div>
+                    <span className="font-medium uppercase tracking-wide">{sig.category.replace(/_/g, ' ')}</span>
+                    <span className="text-slate-400 ml-1">· {sig.severity}</span>
+                    <p className="text-slate-400 mt-0.5 leading-relaxed">{sig.detail}</p>
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+          {claim.evidence && claim.evidence.length > 0 && (
+            <>
+              <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500 mb-1">Evidence</div>
+              {claim.evidence.map((ev, i) => (
+                <div key={i} className="text-xs border border-white/10 rounded px-2 py-1.5 space-y-1">
+                  <a href={ev.url} target="_blank" rel="noreferrer" className="block font-mono text-sky-400 hover:text-sky-300 truncate">{ev.url}</a>
+                  <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wide">
+                    <span className={ev.fetched_ok ? 'text-emerald-400' : 'text-red-400'}>fetch: {ev.status}</span>
+                    <span className={ev.quote_present ? 'text-emerald-400' : 'text-amber-400'}>quote {ev.quote_present ? 'present' : 'not found'}</span>
+                    {ev.applicability && (
+                      <span className="text-slate-400">applicability: {ev.applicability.result?.replace(/_/g, ' ')}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -164,7 +201,7 @@ function buildMarkdownReport(result) {
     lines.push(`**Repo:** ${result.owner}/${result.repo}${result.pull_number ? ` #${result.pull_number}` : ''}`);
   }
   if (result.head_sha) lines.push(`**Commit:** \`${result.head_sha}\``);
-  lines.push(`**Gate Decision:** ${(result.gate_decision || 'unknown').replace(/_/g, ' ').toUpperCase()}`);
+  lines.push(`**Gate Decision:** ${(result.gate_decision || 'unknown').replace(/_/g, ' ').toUpperCase()}${result.advisory_mode ? ' (advisory mode)' : ''}`);
   lines.push(`**Commit Status:** ${result.commit_status || 'unknown'}${result.commit_description ? ` — ${result.commit_description}` : ''}`);
   lines.push('');
   lines.push('## Claim Counts');
@@ -204,7 +241,8 @@ function buildMarkdownReport(result) {
         const risk = claim.risk_level || 'unknown';
         const flash = (claim.flash_state || 'unknown').replace(/_/g, ' ');
         const policy = (claim.policy_decision || 'unknown').replace(/_/g, ' ');
-        lines.push(`- [${category}] risk: ${risk} · flash: ${flash} · policy: ${policy} — "${claim.text}"`);
+        const disposition = (claim.disposition || 'unknown').replace(/_/g, ' ');
+        lines.push(`- [${category}] risk: ${risk} · flash: ${flash} · policy: ${policy} · disposition: ${disposition} — "${claim.text}"`);
       }
     }
   }
@@ -434,6 +472,9 @@ export default function GitHubPrVerify() {
                     {result.gate_decision?.replace(/_/g, ' ').toUpperCase()}
                   </div>
                   <p className="text-xs text-slate-500 mt-1">{result.commit_description}</p>
+                  {result.advisory_mode && (
+                    <p className="text-xs text-sky-400/90 mt-1">Advisory mode — findings reported, gate not enforced.</p>
+                  )}
                 </div>
                 <div className="text-right">
                   <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500 mb-1">Commit Status</div>
