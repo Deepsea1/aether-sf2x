@@ -6,14 +6,22 @@ Aether is an AI trust verification layer that catches LLM hallucinations in real
 
 ## 📊 Benchmark Results
 
-| System | Trust Score | Hallucination Rate |
-|--------|------------|-------------------|
-| Plain LLM (no guardrails) | 14/100 | 86% |
-| Vanilla RAG | 28/100 | 72% |
-| RAG + Output Validation | 51/100 | 49% |
-| **Aether (tribunal + red-team)** | **91/100** | **9%** |
+All numbers are Aether's own internal suites, run through the live pipeline and published —
+regardless of outcome — on the in-app [methodology page](https://aether.sf2x.com/methodology).
+They are vendor-run measurements on small, versioned suites, not independent audits.
 
-**Key metrics:** AUC 1.0 · Pearson r=0.98 · Perfect separation between true and hallucinated claims
+| Suite | n | Measures | Latest published result |
+|---|---|---|---|
+| Correlation audit | 24 (12 true / 12 hallucinated) | Does the trust score separate true from hallucinated claims? | AUC 1.0 · Pearson r=0.98 on this suite — a strong internal signal at this n, not proof of perfect separation in general |
+| Negative controls | 30 (+5 thin-coverage probes) | Fabricated-claim catch rate, true-claim pass rate, honest abstention | Gates every release; runs published live |
+| Tribunal lift | 6 hard adversarial questions | Single model vs. full tribunal | Per-item table published |
+
+**Withdrawn claims.** Earlier versions of this README compared Aether (91/100) against
+"Plain LLM 14/100, Vanilla RAG 28/100, RAG + Output Validation 51/100" with derived
+"hallucination rates," and cited a "91 with red-team / 58 without" ablation. Those baselines
+were never evaluated by any code in this repository, so they are withdrawn until they can be
+re-measured and published with n and methodology attached. Live, always-current results:
+[aether.sf2x.com/benchmark](https://aether.sf2x.com/benchmark).
 
 ## 🏗️ How It Works
 
@@ -21,7 +29,8 @@ Aether is an AI trust verification layer that catches LLM hallucinations in real
 Input Text → [Proposer] → [Critic] → [Verifier] → Cryptographic Warrant
 ```
 
-The **red-team loop** is critical: 91/100 with it, 58/100 without.
+The **red-team loop** is architectural — the tribunal is adversarial by design. (The previously
+cited 91-vs-58 ablation is among the withdrawn claims above.)
 
 ## 🔌 API Quick Start
 
