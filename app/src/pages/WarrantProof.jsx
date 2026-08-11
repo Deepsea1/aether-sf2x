@@ -248,6 +248,11 @@ export default function WarrantProof() {
                 access-controlled and stays with its owner. The signature above is the public, tamper-evident
                 commitment to that content: change any of it and verification breaks.
               </div>
+              <div className="mt-2 text-[12px] text-slate-400">
+                Display eligibility: verify this warrant still matches a given text via{' '}
+                <span className="font-mono text-slate-300">warrantRegistry?op=eligibility</span> — the content
+                never leaves your side, only its SHA-256.
+              </div>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-[#0B0F16] p-5 mb-6">
