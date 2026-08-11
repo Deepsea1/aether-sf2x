@@ -267,8 +267,23 @@
     "answer_version_id",
     "conclusion"
   ],
+  // create/update were forced open by hotfix 2d7dccd while the sessionless API
+  // paths still wrote through the request client. Those writes are service-role
+  // now (a27f3c2), so the strict rules are back — same restoration as
+  // AnswerVersion/Inquiry.
   "rls": {
-    "create": true,
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
     "read": {
       "$or": [
         {
@@ -281,7 +296,18 @@
         }
       ]
     },
-    "update": true,
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
     "delete": {
       "$or": [
         {
