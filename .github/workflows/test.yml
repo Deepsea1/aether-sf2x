@@ -118,6 +118,30 @@ jobs:
           print('every called host is permitted')
           PY
 
+  app-shared:
+    name: P4 shared-module unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # The P4 rails (independence clustering §5.6, display eligibility §20,
+      # service modes §15, capability-card gate §18.2) are pure modules under
+      # app/base44/shared/ — deployed inside Deno functions but testable with
+      # plain node (app/package.json is type:module; base44:runtime is only
+      # ever imported lazily). These tests lock the fail-closed contracts the
+      # warrant pipeline depends on.
+      - name: Run shared-module tests
+        run: node --test "app/base44/shared/tests/*.test.mjs"
+
+      # The live-verification suite ships in the repo (it replaced the ad-hoc
+      # session harnesses). No network here — just keep it loadable.
+      - name: Syntax-check the live suite
+        run: node --check scripts/verify-live.mjs
+
   sdk:
     name: SDK tests
     runs-on: ubuntu-latest
