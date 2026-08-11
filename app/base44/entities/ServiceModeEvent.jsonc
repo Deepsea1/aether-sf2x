@@ -1,0 +1,76 @@
+{
+  "name": "ServiceModeEvent",
+  "type": "object",
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": [
+        "normal",
+        "degraded_read_only",
+        "evidence_retrieval_degraded",
+        "model_evaluation_degraded",
+        "signing_degraded",
+        "revalidation_backlog",
+        "cost_limited",
+        "security_incident",
+        "manual_review_only",
+        "emergency_freeze"
+      ],
+      "description": "The service mode entered by this transition (§15.3 TrustServiceMode). The log is append-only and the LATEST row IS the current mode — rows are never updated or deleted, so the chain of rows is itself the §15.4 immutable service_mode_event record."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why the transition happened — the admin's stated reason on explicit transitions, or the tripped indicator's measured detail on auto downgrades. Every transition records why (§15.4)."
+    },
+    "actor_id": {
+      "type": "string",
+      "description": "Who made the transition: the admin user id on explicit transitions, or the invoking workflow/admin id on indicator-tripped auto downgrades ('system' when no id is available)."
+    },
+    "previous_mode": {
+      "type": "string",
+      "enum": [
+        "normal",
+        "degraded_read_only",
+        "evidence_retrieval_degraded",
+        "model_evaluation_degraded",
+        "signing_degraded",
+        "revalidation_backlog",
+        "cost_limited",
+        "security_incident",
+        "manual_review_only",
+        "emergency_freeze"
+      ],
+      "description": "The mode that was active when this transition was recorded (read via getActiveMode at write time — 'normal' when the log was empty)."
+    },
+    "indicator": {
+      "type": "string",
+      "description": "The §15.2 tripwire that fired, present on auto transitions only. Absent — never null — on admin-set transitions (nullable-by-omission)."
+    },
+    "auto": {
+      "type": "boolean",
+      "default": false,
+      "description": "True when a drift indicator tripped the transition; false when an admin set it explicitly. Automation may only DOWNGRADE (normal → degraded) — clearing back to 'normal' is always an explicit admin transition (§15.4)."
+    }
+  },
+  "required": [
+    "mode",
+    "reason"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}
