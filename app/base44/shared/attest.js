@@ -13,6 +13,7 @@ import { runFalsifier, runCoverageCheck } from './falsifier.js';
 import { tribunalCaveat } from './caveat.js';
 import { persistClaimsAndEvidence } from './claimPersistence.js';
 import { buildWarrantV2Payload, signWarrantV2, sha256Hex } from './canonicalSign.js';
+import { clusterSources } from './independence.js';
 
 // Domain-aware warrant expiry: how fast cited sources rot by domain. Medicine
 // guidance and clinical evidence decay faster than statutes, so the
@@ -542,6 +543,21 @@ export async function attestAnswer(svc, opts) {
   const usableSnaps = sourceSnapshots.filter((s) => s.usable);
   if (sources.length > 0 && sourceSnapshots.length > 0 && usableSnaps.length === 0) {
     ver.issues.push('Cited sources are paywalled, JS-rendered, or too thin to hash meaningfully — grounding is weak.');
+  }
+  // §5.6 independence analysis — citation count is not corroboration. Cluster
+  // the gathered sources by origin (same registrable domain / identical
+  // content hash → one origin) so the corroboration summary records how many
+  // INDEPENDENT origins back the answer: four syndicated copies are one
+  // voice. Additive fields on the grounding summary (persisted on the warrant
+  // as authoritative_grounding; nothing existing changes shape); wrapped so
+  // independence analysis can never fail an attestation.
+  try {
+    const indep = clusterSources(sourceSnapshots.map((s) => ({ url: s.url, content_hash: s.content_hash })));
+    ver.grounding.independent_origins = indep.independent_origins;
+    ver.grounding.clusters_summary = indep.clusters.map((c) => ({ origin: c.origin, size: c.members.length, reason: c.reason }));
+    ver.grounding.flags = indep.flags;
+  } catch (e) {
+    console.error('independence analysis failed:', e?.message || e);
   }
   // Sign with the SAME premises that get persisted, so the registry can
   // reconstruct the signed content. Previously we signed with the raw (possibly
