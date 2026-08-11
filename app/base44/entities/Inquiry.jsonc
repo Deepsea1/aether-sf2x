@@ -58,8 +58,22 @@
   "required": [
     "prompt"
   ],
+  // create was forced open by hotfix 2d7dccd while the sessionless API paths
+  // still wrote through the request client. Those writes are service-role now,
+  // so the strict rule is back (same shape as update/delete below).
   "rls": {
-    "create": true,
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
     "read": {
       "$or": [
         {

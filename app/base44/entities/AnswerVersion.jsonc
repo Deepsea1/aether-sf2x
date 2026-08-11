@@ -69,8 +69,23 @@
   //     service-role API paths (shared/attest.js, functions/inquire) do NOT carry the API
   //     caller in created_by_id — no creation path in this repo sets it. Inquiry.customer_id
   //     is the owner field for those lineages. A created_by_id gate 404s paying customers.
+  // create/update were forced open by hotfix 2d7dccd while verifyResponse/
+  // webhookVerify/streamVerify still wrote through the sessionless request
+  // client. Those writes are service-role now, so the strict rules are back:
+  // session creates carry created_by_id; function writes bypass RLS entirely.
   "rls": {
-    "create": true,
+    "create": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
     "read": {
       "$or": [
         {
@@ -83,7 +98,18 @@
         }
       ]
     },
-    "update": true,
+    "update": {
+      "$or": [
+        {
+          "created_by_id": "{{user.id}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
     "delete": {
       "$or": [
         {
