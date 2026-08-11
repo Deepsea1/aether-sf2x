@@ -7,6 +7,13 @@
 // CI rule (consumer-side): a deploy where regression=true must not ship.
 // Bucket suppression: a bucket with accuracy < 0.65 is flagged suppressed — the
 // methodology page shows the verdict band only, not numeric confidence, for it.
+//
+// CONSOLIDATED OPS (the platform's 50-function cap): this function also hosts
+// the capability-card capability (MASTER_PLAN v5 §18). body.op selects
+// 'capability_card' (public read of the active card for a domain pack) |
+// 'capability_card_generate' (admin — measure + mint both cards); an unknown
+// op is a 400 fail-closed; no op at all is the original gate-4 calibration
+// behavior below, unchanged.
 
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { runVerification } from '../../shared/attest.js';
@@ -14,6 +21,7 @@ import { CORPUS_V2, CORPUS_VERSION } from '../../shared/corpus-v2.js';
 import { THIN_COVERAGE_V1 } from '../../shared/thinCoverage-v1.js';
 import { emitTelemetry, newTraceId } from '../../shared/telemetry.js';
 import { requireAdmin } from '../../shared/auth.js';
+import { getActiveCard, enforcingAllowed, generateCardData } from '../../shared/capabilityCard.js';
 
 const BUCKETS = [
   { range: '0.6-0.7', lo: 0.6, hi: 0.7 },
@@ -31,6 +39,16 @@ function brier(preds, actuals) {
 
 export default async function (req) {
   try {
+    // Op routing (Base44's 50-function cap): body.op selects a hosted op and
+    // returns before the default gate-4 calibration flow touches anything. The
+    // op is peeked off a clone of the request so the default flow's own
+    // req.json() below still reads an unconsumed body. Unknown op → 400;
+    // absent op → the original publishCalibration behavior, unchanged.
+    const peeked = (await req.clone().json().catch(() => ({}))) || {};
+    if (peeked.op === 'capability_card') return await capabilityCardOp(req, peeked);
+    if (peeked.op === 'capability_card_generate') return await capabilityCardGenerateOp(req);
+    if (peeked.op !== undefined) return Response.json({ error: 'unknown op' }, { status: 400 });
+
     const base44 = createClientFromRequest(req);
     const svc = base44.asServiceRole;
     const admin = await requireAdmin(base44);
@@ -157,6 +175,88 @@ export default async function (req) {
     });
   } catch (error) {
     console.error('publishCalibration error', error);
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+}
+
+// Public projection of a CapabilityCard row — the declared §18.1 fields plus
+// row identity, with unmeasured metrics normalized to explicit null so the
+// surface is stable and an absent measurement can never read as zero.
+function publicCard(c) {
+  return {
+    capability_card_id: c.id,
+    created_date: c.created_date,
+    verifier_version: c.verifier_version,
+    domain_pack_id: c.domain_pack_id,
+    evaluated_tasks: c.evaluated_tasks || [],
+    prohibited_tasks: c.prohibited_tasks || [],
+    known_limitations: c.known_limitations || [],
+    benchmark_refs: c.benchmark_refs || [],
+    false_pass_rate_by_risk: (c.false_pass_rate_by_risk && typeof c.false_pass_rate_by_risk === 'object') ? c.false_pass_rate_by_risk : {},
+    false_block_rate_by_risk: (c.false_block_rate_by_risk && typeof c.false_block_rate_by_risk === 'object') ? c.false_block_rate_by_risk : {},
+    extraction_recall: typeof c.extraction_recall === 'number' ? c.extraction_recall : null,
+    evidence_alignment_rate: typeof c.evidence_alignment_rate === 'number' ? c.evidence_alignment_rate : null,
+    citation_integrity_rate: typeof c.citation_integrity_rate === 'number' ? c.citation_integrity_rate : null,
+    valid_from: c.valid_from || null,
+    reviewed_at: c.reviewed_at || null,
+    expires_at: c.expires_at ?? null,
+  };
+}
+
+// ——— op=capability_card — public read of the active verifier capability card
+// (MASTER_PLAN v5 §18) for a domain pack. CapabilityCard rows are RLS
+// deny-by-default, so the published projection goes through the service role
+// here. No auth (transparency): the card is the public, honest statement of
+// what the verifier has and has not measured. ?domain_pack_id= in the query
+// string (or the body field) selects the pack; default technical-docs@1.0.
+// The §18.2 enforcing verdict is computed server-side in the shared module so
+// every consumer sees the same gate.
+async function capabilityCardOp(req, peeked) {
+  try {
+    const base44 = createClientFromRequest(req);
+    const svc = base44.asServiceRole;
+    let packId = '';
+    try { packId = new URL(req.url).searchParams.get('domain_pack_id') || ''; } catch { /* body-only invocation */ }
+    if (!packId) packId = String(peeked.domain_pack_id || '').trim();
+    if (!packId) packId = 'technical-docs@1.0';
+    const card = await getActiveCard(svc, packId);
+    return Response.json({
+      domain_pack_id: packId,
+      card: card ? publicCard(card) : null,
+      enforcing: enforcingAllowed(card),
+    });
+  } catch (error) {
+    console.error('publishCalibration op=capability_card error', error);
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+}
+
+// ——— op=capability_card_generate — admin: measure + mint both capability
+// cards. general-verify carries rates computed from the latest stored
+// negative-control run; technical-docs@1.0 carries nulls and deliberately
+// fails the §18.2 gate until a wedge-specific measurement exists. A number is
+// never fabricated — absent measurement is null. keyExpirySweep's admin gate:
+// human admins and workflow runs alike.
+async function capabilityCardGenerateOp(req) {
+  try {
+    const base44 = createClientFromRequest(req);
+    const _auth = await requireAdmin(base44);
+    if (!_auth.ok) return _auth.response;
+    const svc = base44.asServiceRole;
+
+    const cards = await generateCardData(svc);
+    const created = [];
+    for (const data of cards) {
+      created.push(await svc.entities.CapabilityCard.create(data));
+    }
+    await svc.entities.AuditLog.create({
+      event_type: 'gate_decision', entity_type: 'CapabilityCard', entity_id: null, actor_id: _auth.user?.id,
+      summary: `Capability cards generated: ${created.map((c) => c.domain_pack_id).join(' + ')} · verifier ${created[0]?.verifier_version || '?'}`,
+      metadata: { card_ids: created.map((c) => c.id), packs: created.map((c) => c.domain_pack_id), benchmark_refs: created[0]?.benchmark_refs || [], automated: true },
+    }).catch(() => {});
+    return Response.json({ generated: true, cards: created.map(publicCard) });
+  } catch (error) {
+    console.error('publishCalibration op=capability_card_generate error', error);
     return Response.json({ error: error.message }, { status: 500 });
   }
 }

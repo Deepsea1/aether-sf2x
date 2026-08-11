@@ -1,0 +1,105 @@
+{
+  "name": "CapabilityCard",
+  "type": "object",
+  "properties": {
+    "verifier_version": {
+      "type": "string",
+      "description": "Verifier pipeline version the card's measurements were taken against (PIPELINE_VERSION, e.g. 2.1.0-hr-guardrails). The card id itself is the row id — capability_card_id is not a separate field."
+    },
+    "domain_pack_id": {
+      "type": "string",
+      "description": "Domain pack the card scopes, e.g. general-verify or technical-docs@1.0."
+    },
+    "evaluated_tasks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Tasks the verifier has actually been evaluated on for this pack — an empty array is an honest 'nothing evaluated yet'."
+    },
+    "prohibited_tasks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Tasks this pack must not perform — the card's explicit scope boundary."
+    },
+    "known_limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Plain-language limitations behind the numbers: suite provenance, n, unstratified aggregates, unmeasured metrics."
+    },
+    "benchmark_refs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Row ids of the stored evaluation runs the card's numbers were computed from (e.g. CorrelationAudit ids). Empty when nothing is measured."
+    },
+    "false_pass_rate_by_risk": {
+      "type": "object",
+      "description": "Risk tier (low/moderate/high/critical) → measured false-pass rate: fabricated/corrupted claims the pipeline passed, over that class count. A tier's value is null when unmeasured — absent measurement is never replaced with an estimate."
+    },
+    "false_block_rate_by_risk": {
+      "type": "object",
+      "description": "Risk tier (low/moderate/high/critical) → measured false-block rate: true claims the pipeline failed, over the true-claim count. The §18.2 gate requires MEASURED high <= 0.10 and critical <= 0.05 before default hard-blocking; null fails the gate closed."
+    },
+    "extraction_recall": {
+      "type": "number",
+      "description": "Measured claim-extraction recall on a gold corpus (§6.3). Null when no stored measurement exists — null fails the §18.2 gate closed."
+    },
+    "evidence_alignment_rate": {
+      "type": "number",
+      "description": "Measured rate of correct evidence-to-claim alignment. Null when no stored gold-labeled measurement exists — grounding match flags are not gold alignment labels."
+    },
+    "citation_integrity_rate": {
+      "type": "number",
+      "description": "Measured rate of citations that resolve to and support their claims. Null when no stored gold-labeled measurement exists."
+    },
+    "valid_from": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Start of the card's validity window — a card is active only from this instant."
+    },
+    "reviewed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the card was reviewed/minted. Among active cards for a pack, the newest reviewed_at wins."
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "End of the validity window — at or past this instant the card is inactive and the §18.2 gate reads it as expired. Absent/null means the card does not expire (it can still fail the gate on unmeasured rates)."
+    }
+  },
+  "required": [
+    "verifier_version",
+    "domain_pack_id",
+    "valid_from",
+    "reviewed_at"
+  ],
+  "rls": {
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}
