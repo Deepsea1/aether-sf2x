@@ -97,7 +97,16 @@ function ClaimRow({ claim, index }) {
           )}
           {claim.evidence && claim.evidence.length > 0 && (
             <>
-              <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500 mb-1">Evidence</div>
+              <div className="flex flex-wrap items-center gap-2 mb-1">
+                <span className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Evidence</span>
+                <span className="text-[10px] text-slate-500">
+                  {claim.evidence.length} citation{claim.evidence.length === 1 ? '' : 's'}
+                  {typeof claim.independent_origins === 'number' && ` · ${claim.independent_origins} independent origin${claim.independent_origins === 1 ? '' : 's'}`}
+                </span>
+                {claim.independence_flags && claim.independence_flags.includes('syndicated_copies') && (
+                  <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border text-amber-400 border-amber-400/30 bg-amber-400/5">syndicated</span>
+                )}
+              </div>
               {claim.evidence.map((ev, i) => (
                 <div key={i} className="text-xs border border-white/10 rounded px-2 py-1.5 space-y-1">
                   <a href={ev.url} target="_blank" rel="noreferrer" className="block font-mono text-sky-400 hover:text-sky-300 truncate">{ev.url}</a>
@@ -475,6 +484,11 @@ export default function GitHubPrVerify() {
                   {result.advisory_mode && (
                     <p className="text-xs text-sky-400/90 mt-1">Advisory mode — findings reported, gate not enforced.</p>
                   )}
+                  {(result.gate_reasons || [])
+                    .filter((r) => typeof r === 'string' && (r.startsWith('enforcing requested but not unlocked') || r.startsWith('service mode ')))
+                    .map((r, i) => (
+                      <p key={i} className="text-xs text-amber-400/90 mt-1">{r}</p>
+                    ))}
                 </div>
                 <div className="text-right">
                   <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500 mb-1">Commit Status</div>

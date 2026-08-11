@@ -76,29 +76,32 @@ Decompose the text into discrete factual claims, judge each as supported or unsu
           for (const c of claims) send({ stage: 'claim', claim: c });
 
           // Persist the verification.
-          // customer_id: these records are created via the request client from an
+          // Written via the service-role client so the writes survive strict
+          // entity RLS — the sessionless request client only worked while
+          // create was forced open (commit 2d7dccd).
+          // customer_id: these records are created service-role from an
           // x-api-key call with no Base44 session, so created_by_id is not the
-          // caller — customer_id is the only owner attribution these lineages get,
-          // and gateApi's side-effect gate reads it.
-          const inquiry = await base44.entities.Inquiry.create({
+          // caller — customer_id is the only owner attribution these lineages
+          // get, and gateApi's side-effect gate reads it.
+          const inquiry = await svc.entities.Inquiry.create({
             prompt: text.slice(0, 2000), domain: 'verification', stakes_level: 'medium', status: 'answered',
             customer_id: apiKey.user_id,
             description: `Stream verification · source=${source} · verdict=${verdict} · trust=${trust_score}`,
           });
-          const av = await base44.entities.AnswerVersion.create({
+          const av = await svc.entities.AnswerVersion.create({
             inquiry_id: inquiry.id, version: 1, answer_text: text.slice(0, 4000),
             cognitive_state: { source, verdict, latency_ms, claim_count: claims.length },
             metrics: { support_ratio: claims.length ? claims.filter((c) => c.supported).length / claims.length : 0 },
             trust_score, stakes_level: 'medium',
           });
-          const warrant = await base44.entities.Warrant.create({
+          const warrant = await svc.entities.Warrant.create({
             answer_version_id: av.id, premises: claims.map((c) => c.claim).slice(0, 20),
             conclusion: (v.summary || text.slice(0, 500)), confidence_score: trust_score / 100,
             validity_status: verdict === 'verified' ? 'valid' : verdict === 'contested' ? 'weak' : 'invalid',
             sources: [], expiry_date: new Date(Date.now() + 30 * 86400000).toISOString(),
             description: `Stream verification · ${verdict} · ${latency_ms}ms`,
           });
-          await base44.entities.AnswerVersion.update(av.id, { warrant_id: warrant.id }).catch(() => {});
+          await svc.entities.AnswerVersion.update(av.id, { warrant_id: warrant.id }).catch(() => {});
           if (apiKey) await recordUsage(svc, apiKey, 'verifyResponse', CREDIT_COSTS.verifyResponse || 2, { inquiry_id: inquiry.id });
 
           send({ stage: 'verdict', trust_score, verdict, corrections, summary: v.summary || '', warrant_id: warrant.id, tribunal_url: `/verify/${av.id}`, latency_ms });

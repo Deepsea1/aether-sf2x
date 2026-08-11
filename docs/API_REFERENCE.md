@@ -445,6 +445,72 @@ legacy verification stays available server-side forever.
 5. Verify the Ed25519 signature over the UTF-8 bytes of the hex hash string
    using the `public_key_pem` from key discovery (match on `key_id`).
 
+### Display eligibility (`op=eligibility`)
+
+`GET|POST /api/functions/warrantRegistry?op=eligibility` (POST callers may put
+the fields in the body instead) — the §20 anti-laundering check as a public,
+privacy-safe op (no auth). A v2 warrant binds the exact answer text via
+`answer_text_sha256`; this op answers **"does the text being displayed still
+carry this warrant?"** by hash comparison alone — you never send the content,
+only its SHA-256.
+
+**Request** — `content_sha256` (required) plus any one warrant locator:
+`warrant_id`, `signed_hash`, or `verification_id`/`lineage_id`:
+
+```
+GET /api/functions/warrantRegistry?op=eligibility&warrant_id=<id>&content_sha256=<64 hex chars>
+```
+
+**The exact hash recipe** — `content_sha256` = lowercase SHA-256 hex over the
+UTF-8 bytes of the answer text **as persisted** — no trimming, no
+case-folding, no whitespace normalization:
+
+- `verifyResponse` / `webhookVerify` warrants persist only the **first 4,000
+  characters** (`text.slice(0, 4000)`) — hash that slice.
+- `inquire` / `warrantApi` / tribunal warrants persist the **full** answer
+  text (max 20,000 chars) — hash it whole.
+
+Uppercase hex is normalized server-side; anything that is not a 64-hex-char
+digest is a `400`.
+
+**Response** (integrity metadata only — never warrant content):
+
+```json
+{
+  "eligible": false,
+  "reasons": ["content hash does not match the warranted text"],
+  "checked": {
+    "content_hash_match": false,
+    "status_active": true,
+    "not_expired": true,
+    "v2_bound": true
+  },
+  "warrant_id": "6a6de04b26cf84c8aa37847f",
+  "warrant_status": "valid",
+  "expires_at": "2026-09-10T12:00:00.000Z",
+  "hash_recipe": "content_sha256 = lowercase SHA-256 hex over the UTF-8 bytes of the answer text AS PERSISTED..."
+}
+```
+
+**Fail-closed semantics** — `eligible` is true only when **all four** checks
+pass:
+
+- `content_hash_match` — strict equality against the warrant's
+  `answer_text_sha256`.
+- `status_active` — only `validity_status: "valid"` passes; `weak`, `invalid`,
+  `insufficient_evidence`, `contested`, and `expired` all fail.
+- `not_expired` — `expiry_date` must be present, parseable, and in the future.
+- `v2_bound` — a pre-v2 warrant with no `answer_text_sha256` is **never**
+  eligible (`"no content binding (pre-v2 warrant)"`): there is nothing to
+  match the displayed text against.
+
+An unknown warrant answers `404 { "eligible": false, "reasons": ["warrant not
+found"] }`. The embed script (`embed.js`) uses this op automatically when the
+script tag carries `data-content-sha256` (or `data-content`, hashed locally
+with WebCrypto): an eligible warrant renders the normal badge; anything else
+renders a grey struck-out "verification no longer matches this content" state
+— never the green badge.
+
 ### Inclusion proofs (RFC 6962)
 
 `POST /api/functions/warrantApi` issues warrants;

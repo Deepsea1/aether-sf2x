@@ -14,6 +14,17 @@
 // Evidence is input to the resolver, never a gate on the function — fetch
 // failures degrade a claim's disposition, they never crash the run.
 //
+// P4 (defensible wedge): three run-level honesty layers. Independence (§5.6):
+// a claim's citations are clustered by origin so corroboration reads per
+// independent origin, never per citation. The §18.2 symmetric enforcing gate:
+// an enforcing policy only hard-blocks when the domain pack's active
+// capability card carries measured false-block rates under threshold —
+// otherwise the run degrades to advisory and says why; advisory and v1
+// policies bypass the check entirely. Mode awareness (§15.4): the active
+// service mode is stamped on every response, and a degraded-evaluation mode
+// forces advisory — a breaker never lets the gate block on evaluation it
+// cannot trust. Every forced degradation lands in gate_reasons.
+//
 // Accepts either:
 //   - { owner, repo, pull_number, head_sha } → fetches the diff from GitHub API
 //   - { owner, repo, head_sha, diff_text }  → caller provides the diff directly
@@ -35,6 +46,9 @@ import { assessApplicability, quotePresent, buildResolverInputs } from '../../sh
 import { RESOLVER_VERSION, resolveClaim, resolveGate } from '../../shared/decisionResolver.js';
 import { persistClaimEvidence } from '../../shared/claimPersistence.js';
 import { createReviewsForGate } from '../../shared/reviews.js';
+import { clusterSources } from '../../shared/independence.js';
+import { getActiveCard, enforcingAllowed } from '../../shared/capabilityCard.js';
+import { getActiveMode, DEGRADED_FORCES_ADVISORY } from '../../shared/serviceMode.js';
 
 const SYSTEM_DEFAULT_POLICY = parsePolicyYaml(`
 version: 1
@@ -206,8 +220,45 @@ export default async function(req) {
     }
     // Policy mode (§11.3 / policy v2 contract): the v2 parser sets mode itself
     // ('advisory' when a v2 file omits it); absent mode — a v1 policy — keeps
-    // the file's current enforcing behavior. Over-cap forces advisory.
-    const advisoryMode = policy.mode === 'advisory' || runForcedAdvisory;
+    // the file's current enforcing behavior. Over-cap forces advisory, and the
+    // §15.4 / §18.2 checks below can force it further — forcing only ever
+    // moves toward not-blocking, never the reverse.
+    let advisoryMode = policy.mode === 'advisory' || runForcedAdvisory;
+    const gateNotes = [];
+
+    // ---- Service-mode awareness (§15.4) — read once per run, never fatal.
+    // getActiveMode itself degrades to { mode: 'normal', mode_read_error: true }
+    // on a read failure; the try/catch only guards an unexpected module throw.
+    // The stamp rides the response so degradation is surfaced, never hidden,
+    // and a degraded-evaluation mode forces advisory — a breaker never lets
+    // the gate block on evaluation it cannot trust.
+    let serviceMode = { mode: 'normal' };
+    try { serviceMode = await getActiveMode(svc); } catch (e) { serviceMode = { mode: 'normal', mode_read_error: true }; }
+    const modeStamp = serviceMode.mode_read_error ? { service_mode: serviceMode.mode, mode_read_error: true } : { service_mode: serviceMode.mode };
+    if (DEGRADED_FORCES_ADVISORY.includes(serviceMode.mode)) {
+      advisoryMode = true;
+      gateNotes.push(`service mode '${serviceMode.mode}' forces advisory for this run (§15.4 — a breaker never lets the gate block on degraded evaluation)`);
+    }
+
+    // ---- §18.2 symmetric enforcing gate: an enforcing policy may only
+    // hard-block when the domain pack's ACTIVE capability card carries
+    // measured (not null) false-block rates under threshold. Advisory and v1
+    // policies bypass this check entirely — their behavior is unchanged. A
+    // card lookup failure fails toward advisory, never toward blocking.
+    if (policy.mode === 'enforcing') {
+      let cardGate;
+      try {
+        const card = await getActiveCard(svc, policy.domain_pack || 'technical-docs@1.0');
+        cardGate = enforcingAllowed(card);
+      } catch (e) {
+        console.error('Capability card lookup failed:', e?.message || e);
+        cardGate = { allowed: false, reasons: [`capability card lookup failed: ${String(e?.message || e).slice(0, 160)}`] };
+      }
+      if (!cardGate.allowed) {
+        advisoryMode = true;
+        gateNotes.push(`enforcing requested but not unlocked: ${cardGate.reasons.join('; ')} (§18.2 symmetric gate — no default hard-blocking without a measured false-block rate)`);
+      }
+    }
 
     if (!claims.length) {
       // No factual claims found — set a clean status.
@@ -231,6 +282,8 @@ export default async function(req) {
         claims_reused: 0,
         resolver_version: RESOLVER_VERSION,
         advisory_mode: advisoryMode,
+        gate_reasons: gateNotes,
+        ...modeStamp,
       });
     }
 
@@ -392,7 +445,20 @@ export default async function(req) {
           }),
         });
       }
-      if (citations.length) claim.evidence = citations;
+      if (citations.length) {
+        claim.evidence = citations;
+        // §5.6 independence: corroboration counts per independent origin, not
+        // per citation — four syndicated copies of one story are one voice.
+        // Pure math over the snapshots already gathered; wrapped so
+        // independence can never fail the run.
+        try {
+          const indep = clusterSources(citations.map((c) => ({ url: c.url, content_hash: c.content_hash, excerpt: c.excerpt })));
+          claim.independent_origins = indep.independent_origins;
+          claim.independence_flags = indep.flags;
+        } catch (e) {
+          console.error('Independence clustering failed:', e?.message || e);
+        }
+      }
     }
     if (fetchesCapped) {
       runNotes.push(`evidence_fetches_capped: citation fetches limited to ${maxEvidenceFetches} per run — remaining cited URLs were not fetched`);
@@ -503,6 +569,11 @@ export default async function(req) {
       statusState = 'failure';
       statusDesc = resolverGate.reasons[0] || 'resolver: claim dispositions require review';
     }
+    // §15.4 / §18.2 forcing reasons ride gate_reasons so the caller sees WHY
+    // the run is advisory, not just that it is. Pushed after the tighten
+    // checks above (they read reasons[0], which stays the resolver's own
+    // reason) and before the downgrade note (cause before effect).
+    if (gateNotes.length) resolverGate.reasons.push(...gateNotes);
     if (advisoryMode) {
       if (gateDecision === 'blocked') {
         gateDecision = 'requires_review';
@@ -563,6 +634,7 @@ export default async function(req) {
         gate_decision: gateDecision,
         resolver_version: RESOLVER_VERSION,
         advisory_mode: advisoryMode,
+        service_mode: serviceMode.mode,
         dispositions: dispositionCounts,
         reviews_created: reviewHandoff.created,
         notes: runNotes,
@@ -600,6 +672,8 @@ export default async function(req) {
         policy_rule: c.policy_rule,
         disposition: c.disposition,
         evidence: c.evidence || [],
+        independent_origins: c.independent_origins ?? null,
+        independence_flags: c.independence_flags || [],
         file_path: c.file_path,
         diff_line: c.diff_line,
         reused: c.reused,
@@ -630,6 +704,7 @@ export default async function(req) {
       claims_found: totalClaimsFound,
       resolver_version: RESOLVER_VERSION,
       advisory_mode: advisoryMode,
+      ...modeStamp,
       dispositions: dispositionCounts,
       reviews: reviewHandoff,
       notes: runNotes,

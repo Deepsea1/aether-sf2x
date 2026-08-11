@@ -253,6 +253,10 @@
       "type": "string",
       "description": "SHA-256 (lowercase hex) of the answer text AS PERSISTED on the AnswerVersion row (post-truncation), so the v2 payload can be rebuilt from entities without embedding the full answer text in the signature input."
     },
+    "service_mode_at_issuance": {
+      "type": "string",
+      "description": "Service mode active when this warrant was issued (§9.2): 'normal' or a degraded mode from the ServiceModeEvent ledger. Absent on warrants issued before service-mode stamping rolled out."
+    },
     "description": {
       "type": "string",
       "maxLength": 1000,

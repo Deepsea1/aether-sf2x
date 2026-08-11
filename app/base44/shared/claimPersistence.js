@@ -8,6 +8,7 @@
 // its own evidence trail, verdict, and policy decision.
 
 import { classifyClaim } from './claimExtractor.js';
+import { clusterSources } from './independence.js';
 
 async function sha256hex(text) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(text ?? '')));
@@ -250,6 +251,18 @@ export async function persistClaimEvidence(svc, { claimId, tenantId, claimText =
       .map((c) => ({ source_url: c.url, excerpt: c.excerpt || '(quote matched in fetched content)', match_score: 1 }));
     const fetchedAny = cits.some((c) => c.fetched_ok === true);
     const coverage = supportingExcerpts.length ? 'partial' : (fetchedAny ? 'sampled' : 'unverified');
+    // §5.6 independence summary over the claim's citations — same registrable
+    // domain, identical content hash, or near-duplicate excerpts collapse to
+    // one origin, so corroboration reads per independent origin rather than
+    // per citation. Additive field on the pack; wrapped so independence can
+    // never fail the evidence persist.
+    let independence = null;
+    try {
+      const indep = clusterSources(cits.map((c) => ({ url: c.url, content_hash: c.content_hash, excerpt: c.excerpt })));
+      independence = { independent_origins: indep.independent_origins, flags: indep.flags };
+    } catch (e) {
+      console.error('Independence summary failed:', e?.message || e);
+    }
     const manifestHash = await sha256hex(JSON.stringify({
       claim_id: claimId,
       claim_text: String(claimText || '').slice(0, 2000),
@@ -265,6 +278,7 @@ export async function persistClaimEvidence(svc, { claimId, tenantId, claimText =
       coverage,
       limitations: ['Deterministic wedge grounding: quote containment + applicability v1 only — no model verification ran.'],
       manifest_hash: manifestHash,
+      ...(independence ? { independence } : {}),
       tenant_id: tenantId,
       description: `Wedge evidence for claim ${claimId} · ${sources.length} citation(s) · ${supportingExcerpts.length} quote match(es)`.slice(0, 1000),
     });

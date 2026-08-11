@@ -1,0 +1,55 @@
+name: aether-dogfood
+
+# Aether verifies Aether (MASTER_PLAN v5 §19.6 — the dogfooding gate).
+#
+# Every PR that touches our public claims (README, docs, SECURITY.md) runs the
+# repo's own GitHub Action against the changed story we tell the world. The
+# post-deploy "fix endpoint docs" incident is the standing proof this failure
+# class is real — our docs drifted from our API within a day of shipping.
+#
+# Advisory mode, deliberately: per §18.2 there is no default hard-blocking
+# without a measured false-block rate for the pack, and the technical-docs
+# capability card does not carry one yet. The check reports what enforcing
+# would have done; it never blocks a merge.
+#
+# Requires the AETHER_API_KEY repository secret. When it is absent the job
+# exits neutral with a visible notice instead of failing — a missing secret is
+# a setup gap, not a documentation problem, and pretending otherwise would be
+# its own kind of dishonesty.
+
+on:
+  pull_request:
+    paths:
+      - 'README.md'
+      - 'docs/**'
+      - 'SECURITY.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for API key
+        id: key
+        env:
+          AETHER_API_KEY: ${{ secrets.AETHER_API_KEY }}
+        run: |
+          if [ -n "$AETHER_API_KEY" ]; then
+            echo "have=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=no" >> "$GITHUB_OUTPUT"
+            echo "::notice::AETHER_API_KEY secret not set — dogfood verification skipped. Add the secret to activate the §19.6 gate."
+          fi
+
+      - name: Verify README claims with Aether
+        if: steps.key.outputs.have == 'yes'
+        uses: ./github-action
+        with:
+          api-key: ${{ secrets.AETHER_API_KEY }}
+          text: README.md
+          mode: advisory

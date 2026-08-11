@@ -20,6 +20,102 @@ const GUARANTEES = [
   { yes: 'Corrections and drift are logged and measured.', no: 'SF2X cannot prevent novel hallucinations it has never observed — it surfaces and corrects them fast.' },
 ];
 
+const CAPABILITY_PACKS = ['general-verify', 'technical-docs@1.0'];
+
+// A rate is a number or it is not measured — never a dash that could read as zero.
+const rateLabel = (v) => (typeof v === 'number' ? `${(v * 100).toFixed(1)}%` : 'not yet measured');
+
+// Verifier capability card (§18): what the verifier has MEASURED it can do per
+// domain pack, and whether the symmetric §18.2 gate allows enforcement. The
+// enforcing verdict comes from the server so every consumer sees the same gate.
+function VerifierCapabilityCard() {
+  const [packs, setPacks] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const results = await Promise.all(CAPABILITY_PACKS.map(async (packId) => {
+        try {
+          const res = await base44.functions.invoke('publishCalibration', { op: 'capability_card', domain_pack_id: packId });
+          const d = res?.data || res;
+          return { packId, card: d?.card || null, enforcing: d?.enforcing || { allowed: false, reasons: ['enforcing status unavailable'] } };
+        } catch {
+          return { packId, card: null, enforcing: { allowed: false, reasons: ['capability card fetch failed'] } };
+        }
+      }));
+      setPacks(results);
+    })();
+  }, []);
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#0B0F16] p-5">
+      <div className="flex items-center gap-2 mb-1">
+        <Gauge className="h-4 w-4 text-sky-400" />
+        <h2 className="text-sm font-medium text-slate-200">Verifier Capability</h2>
+      </div>
+      <p className="text-[11px] text-slate-500 mb-3">Measured limits per domain pack. Enforcement unlocks only with a measured false-block rate (high ≤ 10%, critical ≤ 5%) and measured extraction recall — unmeasured fails closed to advisory.</p>
+      {!packs ? (
+        <p className="text-xs text-slate-600">Loading capability cards…</p>
+      ) : (
+        <div className="grid md:grid-cols-2 gap-3">
+          {packs.map(({ packId, card, enforcing }) => (
+            <div key={packId} className="rounded-lg bg-white/[0.02] border border-white/5 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[11px] font-medium text-slate-200 font-mono">{packId}</div>
+                {enforcing.allowed ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border border-emerald-400/30 text-emerald-300">
+                    <ShieldCheck className="h-3 w-3" /> Enforcing unlocked
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border border-amber-400/30 text-amber-300">
+                    <AlertOctagon className="h-3 w-3" /> Advisory only
+                  </span>
+                )}
+              </div>
+              {card ? (
+                <>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] mb-2">
+                    <span className="text-slate-500">False-pass (high)</span>
+                    <span className="text-slate-300 tabular-nums">{rateLabel(card.false_pass_rate_by_risk?.high)}</span>
+                    <span className="text-slate-500">False-block (high)</span>
+                    <span className="text-slate-300 tabular-nums">{rateLabel(card.false_block_rate_by_risk?.high)}</span>
+                    <span className="text-slate-500">False-block (critical)</span>
+                    <span className="text-slate-300 tabular-nums">{rateLabel(card.false_block_rate_by_risk?.critical)}</span>
+                    <span className="text-slate-500">Extraction recall</span>
+                    <span className="text-slate-300 tabular-nums">{rateLabel(card.extraction_recall)}</span>
+                  </div>
+                  <p className="text-[10px] text-slate-600 mb-2">Verifier {card.verifier_version}{card.reviewed_at && <> · reviewed {new Date(card.reviewed_at).toLocaleDateString()}</>}{card.expires_at && <> · expires {new Date(card.expires_at).toLocaleDateString()}</>}</p>
+                </>
+              ) : (
+                <p className="text-[11px] text-slate-500 mb-2">No capability card generated yet — nothing is measured for this pack.</p>
+              )}
+              {!enforcing.allowed && enforcing.reasons.length > 0 && (
+                <div className="pt-2 border-t border-white/5 mb-2">
+                  <div className="text-[10px] uppercase tracking-wider text-slate-600 mb-1">Enforcement locked because</div>
+                  <ul className="space-y-0.5">
+                    {enforcing.reasons.map((r, i) => (
+                      <li key={i} className="text-[11px] text-amber-300/80">· {r}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {card && (card.known_limitations || []).length > 0 && (
+                <div className="pt-2 border-t border-white/5">
+                  <div className="text-[10px] uppercase tracking-wider text-slate-600 mb-1">Known limitations</div>
+                  <ul className="space-y-0.5">
+                    {card.known_limitations.map((l, i) => (
+                      <li key={i} className="text-[11px] text-slate-500">· {l}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TrustCenter() {
   const [data, setData] = useState(null);
 
@@ -69,6 +165,9 @@ export default function TrustCenter() {
             </div>
           ))}
         </div>
+
+        {/* Verifier capability — measured limits + the §18.2 enforcing gate */}
+        <VerifierCapabilityCard />
 
         {data && (
           <>

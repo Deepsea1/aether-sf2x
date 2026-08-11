@@ -6,6 +6,7 @@ import { verifySignature, signatureScheme } from './sf2xVerify.ts';
 import { WARRANT_SCHEMA_V2, jcsCanonicalize, sha256Hex, buildWarrantV2Payload, verifyWarrantV2, signWarrantV2, publicKeyId } from '../../shared/canonicalSign.js';
 import { generateSignature } from '../../shared/sf2xCore.js';
 import { merkleRoot, inclusionProof } from '../../shared/merkle.js';
+import { checkEligibility } from '../../shared/displayEligibility.js';
 
 // Public, read-only Warrant Registry — an append-only transparency log. Anyone
 // can independently verify a warrant's cryptographic signature and inspect the
@@ -18,7 +19,8 @@ import { merkleRoot, inclusionProof } from '../../shared/merkle.js';
 // the parked aetherKeys + transparencyCheckpoint capabilities. body.op — or
 // ?op= in the URL query string, so plain GETs work — selects 'keys' |
 // 'checkpoint' | 'checkpoint_create'; an unknown op is a 400 fail-closed; no
-// op at all is the original registry behavior below, unchanged.
+// op at all is the original registry behavior below, unchanged. op=eligibility
+// (P4 §20) is the display-eligibility rail — see its block below.
 
 async function sha256hex(text) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(text ?? '')));
@@ -289,6 +291,77 @@ async function opCheckpoint(req, base44, svc, op) {
   }
 }
 
+// ——— op=eligibility — the §20 display-eligibility rail as a public op. A v2
+// warrant binds the EXACT answer text via answer_text_sha256; this op answers
+// "does the text being displayed still carry this warrant?" by hash comparison
+// alone. The caller NEVER sends content — only sha256(displayed text), hashed
+// per hash_recipe below — and the response is integrity metadata only, the
+// same privacy boundary as the verified_warrant block in the default path
+// (§9.2): no premises, conclusion, sources, claim text, or answer excerpts
+// ever leave here. GET (?content_sha256=…&warrant_id=…) or POST body, no auth
+// (embeds and badges re-check eligibility on render — §21.6).
+const HASH_RECIPE = 'content_sha256 = lowercase SHA-256 hex over the UTF-8 bytes of the answer text AS PERSISTED on the AnswerVersion row — no trimming, no case-folding, no whitespace normalization. verifyResponse/webhookVerify persist only the first 4,000 characters (text.slice(0, 4000)): hash that slice for their warrants. inquire/warrantApi/tribunal warrants persist the full answer text (max 20,000 chars): hash it whole.';
+
+async function opEligibility(req, svc, body) {
+  try {
+    // Params ride in the POST body or the query string (so a plain GET works —
+    // the op-router rule above).
+    const params = new URL(req.url).searchParams;
+    const pick = (k) => body[k] ?? params.get(k) ?? null;
+
+    // Normalize case at the boundary (the persisted hash is lowercase hex),
+    // then fail closed on anything that is not a SHA-256 hex digest.
+    const content_sha256 = String(pick('content_sha256') || '').trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(content_sha256)) {
+      return Response.json({ error: 'content_sha256 is required: the 64-hex-char SHA-256 of the displayed text, computed per hash_recipe.', hash_recipe: HASH_RECIPE }, { status: 400 });
+    }
+
+    // Resolve the warrant — the same lookup ladder as the default path below
+    // (warrant_id, then signed_hash, then verification_id/lineage_id), so any
+    // id an API response or embed carries resolves here too.
+    let w = null;
+    const warrantId = pick('warrant_id');
+    if (warrantId) {
+      w = await svc.entities.Warrant.get(warrantId).catch(() => null);
+    }
+    const signedHash = pick('signed_hash');
+    if (!w && signedHash) {
+      const found = await svc.entities.Warrant.filter({ signed_hash: String(signedHash) }, '-created_date', 1).catch(() => []);
+      w = (found && found[0]) || null;
+    }
+    if (!w) {
+      const lid = pick('verification_id') || pick('lineage_id');
+      if (lid) {
+        w = await svc.entities.Warrant.get(lid).catch(() => null);
+        if (!w) {
+          const found = await svc.entities.Warrant.filter({ answer_version_id: lid }, '-created_date', 1).catch(() => []);
+          w = (found && found[0]) || null;
+        }
+      }
+    }
+    if (!w) return Response.json({ eligible: false, reasons: ['warrant not found'] }, { status: 404 });
+
+    // Pure verdict from the shared rail — fail closed on legacy warrants,
+    // non-'valid' status, and missing/passed expiry (see displayEligibility.js).
+    const verdict = checkEligibility({ warrant: w, content_sha256 });
+
+    // INTEGRITY METADATA ONLY — the verdict, the status, the expiry, and the
+    // recipe. Never warrant content (the default path's privacy boundary).
+    return Response.json({
+      eligible: verdict.eligible,
+      reasons: verdict.reasons,
+      checked: verdict.checked,
+      warrant_id: w.id,
+      warrant_status: w.validity_status || null,
+      expires_at: w.expiry_date || null,
+      hash_recipe: HASH_RECIPE,
+    });
+  } catch (error) {
+    console.error('warrantRegistry op=eligibility error', error);
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+}
+
 export default async function (req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -302,6 +375,7 @@ export default async function (req) {
     const op = body.op || new URL(req.url).searchParams.get('op') || null;
     if (op === 'keys') return await opKeys();
     if (op === 'checkpoint' || op === 'checkpoint_create') return await opCheckpoint(req, base44, svc, op);
+    if (op === 'eligibility') return await opEligibility(req, svc, body);
     if (op) return Response.json({ error: 'unknown op' }, { status: 400 });
 
     const limit = Math.min(Number(body.limit) || 100, 500);

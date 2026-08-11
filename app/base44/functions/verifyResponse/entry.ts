@@ -4,6 +4,7 @@ import { runRedTeamAttack } from '../../shared/redTeam.js';
 import { callLLMJson } from '../../shared/llmRouter.js';
 import { PIPELINE_VERSION, textReuseKey, lookupVerdict, storeVerdict, recordHit } from '../../shared/verdictReuse.js';
 import { buildWarrantV2Payload, signWarrantV2, sha256Hex } from '../../shared/canonicalSign.js';
+import { getActiveMode } from '../../shared/serviceMode.js';
 
 // verifyResponse — the fast verification endpoint behind the Aether widget and
 // browser extension. Accepts an AI-generated text and runs a single fast
@@ -100,6 +101,16 @@ export default async function (req) {
       }
     }
 
+    // === SERVICE-MODE STAMP (§9.2) — read once per request, never fatal ===
+    // getActiveMode itself degrades to { mode: 'normal', mode_read_error: true }
+    // on a read failure; the try/catch only guards an unexpected module throw
+    // (same wrapped-never-fatal idiom as the v2 signing block below). The stamp
+    // rides every verdict payload — cache hits get the CURRENT mode, warrants
+    // record the mode at issuance — so degradation is surfaced, never hidden.
+    let serviceMode = { mode: 'normal' };
+    try { serviceMode = await getActiveMode(svc); } catch (e) { serviceMode = { mode: 'normal', mode_read_error: true }; }
+    const modeStamp = serviceMode.mode_read_error ? { service_mode: serviceMode.mode, mode_read_error: true } : { service_mode: serviceMode.mode };
+
     // === CACHE: identical text returns the prior verdict with no LLM call ===
     // Viral content (everyone pasting the same AI answer) hits the DB, not the
     // LLM — the single biggest cost saver for free/public usage. 7-day TTL.
@@ -120,7 +131,9 @@ export default async function (req) {
         if (hit) {
           await recordHit(svc, hit);
           const cache_age_seconds = Math.max(0, Math.round((Date.now() - new Date(hit.created_date || Date.now()).getTime()) / 1000));
-          return Response.json({ ...hit.payload, cached: true, cache_age_seconds });
+          // modeStamp spreads AFTER the stored payload so a cache hit reports
+          // the mode active NOW, not the one frozen at store time.
+          return Response.json({ ...hit.payload, ...modeStamp, cached: true, cache_age_seconds });
         }
       } catch (e) { /* cache miss is non-fatal */ }
     }
@@ -256,22 +269,25 @@ Respond as a single JSON object.`;
     const latency_ms = Date.now() - t0;
 
     // Persist: log every verification to the Inquiry entity.
-    const inquiry = await base44.entities.Inquiry.create({
+    // Written via the service-role client so the write survives strict entity
+    // RLS — the sessionless request client only worked while create was forced
+    // open (commit 2d7dccd), and these calls carry no Base44 session either way.
+    const inquiry = await svc.entities.Inquiry.create({
       prompt: text.slice(0, 2000),
       domain: 'verification',
       stakes_level: 'medium',
       status: 'answered',
       // Record which customer this verification belongs to. These records are
-      // created via the request client from an x-api-key call with no Base44
-      // session, so created_by_id is not the caller — customer_id is the only
-      // owner attribution these lineages get, and gateApi's side-effect gate
-      // reads it. Null for anonymous/internal (landing demo, playground) calls.
+      // created service-role from an x-api-key call with no Base44 session, so
+      // created_by_id is not the caller — customer_id is the only owner
+      // attribution these lineages get, and gateApi's side-effect gate reads
+      // it. Null for anonymous/internal (landing demo, playground) calls.
       customer_id: apiKey?.user_id || undefined,
       ip_hash: ipHash,
       description: `Widget verification · source=${source} · verdict=${verdict} · trust=${trust_score} · ${latency_ms}ms${ownKey ? ' · byok' : ''}`,
     });
     const claimsOut = claims.map((c) => ({ claim: c.claim, supported: !!c.supported, notes: c.notes || '' }));
-    const av = await base44.entities.AnswerVersion.create({
+    const av = await svc.entities.AnswerVersion.create({
       inquiry_id: inquiry.id, version: 1, answer_text: text.slice(0, 4000),
       cognitive_state: { source, verdict, latency_ms, claim_count: claims.length, correction_count: corrections.length, flags, byok: !!ownKey },
       metrics: { support_ratio: claims.length ? claims.filter((c) => c.supported).length / claims.length : 0 },
@@ -279,7 +295,7 @@ Respond as a single JSON object.`;
     });
     const premises = claims.map((c) => c.claim).slice(0, 20);
     const conclusion = (v.summary || text.slice(0, 500));
-    const warrant = await base44.entities.Warrant.create({
+    const warrant = await svc.entities.Warrant.create({
       answer_version_id: av.id,
       premises,
       conclusion,
@@ -287,6 +303,7 @@ Respond as a single JSON object.`;
       validity_status: verdict === 'verified' ? 'valid' : verdict === 'contested' ? 'weak' : 'invalid',
       sources: [],
       expiry_date: new Date(Date.now() + 30 * 86400000).toISOString(),
+      service_mode_at_issuance: serviceMode.mode,
       description: `Widget verification · ${verdict} · ${claims.length} claims · ${latency_ms}ms`,
     });
     // Dual-sign (§9.3): additive RFC 8785 canonical v2 signature — these
@@ -306,7 +323,7 @@ Respond as a single JSON object.`;
         sources: [],
       }));
       if (v2) {
-        await base44.entities.Warrant.update(warrant.id, {
+        await svc.entities.Warrant.update(warrant.id, {
           schema_version: v2.schema_version, payload_hash_v2: v2.payload_hash_v2, signed_hash_v2: v2.signed_hash_v2, key_id_v2: v2.key_id, answer_text_sha256: answerTextSha256,
         });
       }
@@ -327,9 +344,10 @@ Respond as a single JSON object.`;
       warrant_id: warrant.id, tribunal_url: `/verify/${av.id}`, lineage_id: av.id,
       latency_ms, tribunal_version: PIPELINE_VERSION, domain, byok: !!ownKey,
       certified, certification: certified ? 'certified' : 'uncertified',
+      ...modeStamp,
       red_team: { outcome: redTeam.outcome, severity: redTeam.severity, run_id: redTeam.run?.id || null },
     };
-    await base44.entities.AnswerVersion.update(av.id, {
+    await svc.entities.AnswerVersion.update(av.id, {
       warrant_id: warrant.id,
       cognitive_state: { source, verdict, latency_ms, claim_count: claims.length, correction_count: corrections.length, flags, byok: !!ownKey, certified, red_team_run_id: redTeam.run?.id || null, red_team_outcome: redTeam.outcome, red_team_severity: redTeam.severity, cache_payload: out },
     }).catch(() => {});
