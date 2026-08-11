@@ -15,8 +15,13 @@ import { ledgerIntegrityCheck } from '../../shared/ledger.js';
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
-    const user = await base44.auth.me();
-    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    // Sessionless calls make auth.me() throw a raw platform error
+    // ('Authentication required to view users') that previously surfaced as a
+    // 500 — catch it and return a clean 401. What counts as authorized is
+    // unchanged: no session, no scan.
+    let user = null;
+    try { user = await base44.auth.me(); } catch (e) { user = null; }
+    if (!user) return Response.json({ error: 'Authentication required' }, { status: 401 });
 
     if (req.method !== 'POST') return Response.json({ error: 'Method not allowed' }, { status: 405 });
     const body = await req.json().catch(() => ({}));

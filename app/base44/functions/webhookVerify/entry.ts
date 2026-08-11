@@ -4,6 +4,7 @@ import { callLLMJson } from '../../shared/llmRouter.js';
 import { validateWebhookUrl, guardedPost } from '../../shared/webhooks.js';
 import { PIPELINE_VERSION, textReuseKey, lookupVerdict, recordHit } from '../../shared/verdictReuse.js';
 import { buildWarrantV2Payload, signWarrantV2, sha256Hex } from '../../shared/canonicalSign.js';
+import { getActiveMode } from '../../shared/serviceMode.js';
 
 // webhookVerify — the async webhook verification endpoint documented in
 // docs/API_REFERENCE.md ("Webhook Verification": one text → tribunal verdict →
@@ -82,6 +83,18 @@ export default async function (req) {
     const urlCheck = await validateWebhookUrl(webhookUrl);
     if (!urlCheck.ok) return Response.json({ error: `invalid webhook_url: ${urlCheck.error}` }, { status: 400 });
 
+    // === SERVICE-MODE STAMP (§9.2) — read once per request, never fatal ===
+    // getActiveMode itself degrades to { mode: 'normal', mode_read_error: true }
+    // on a read failure; the try/catch only guards an unexpected module throw
+    // (same wrapped-never-fatal idiom as the v2 signing block below). The stamp
+    // rides every HTTP response (the webhook delivery body is unchanged —
+    // additive fields there would alter the documented webhook contract) and
+    // warrants record the mode at issuance, so degradation is surfaced, never
+    // hidden.
+    let serviceMode = { mode: 'normal' };
+    try { serviceMode = await getActiveMode(svc); } catch (e) { serviceMode = { mode: 'normal', mode_read_error: true }; }
+    const modeStamp = serviceMode.mode_read_error ? { service_mode: serviceMode.mode, mode_read_error: true } : { service_mode: serviceMode.mode };
+
     // === CACHE (read-only): exact-hash reuse of a prior tribunal verdict ===
     // Shares verifyResponse's non-BYOK reuse entries — identical prompt, model,
     // and pipeline version, so the verdict is the one this endpoint would have
@@ -102,9 +115,9 @@ export default async function (req) {
           JSON.stringify({ data: verification }),
         ).catch((e) => ({ ok: false, error: e?.message || 'network error' }));
         if (!sent.ok) {
-          return Response.json({ status: 'webhook_failed', webhook_error: sent.error, verification, cached: true }, { status: 502 });
+          return Response.json({ status: 'webhook_failed', webhook_error: sent.error, verification, cached: true, ...modeStamp }, { status: 502 });
         }
-        return Response.json({ status: 'webhook_sent', webhook_status: sent.status, verification, cached: true });
+        return Response.json({ status: 'webhook_sent', webhook_status: sent.status, verification, cached: true, ...modeStamp });
       }
     } catch (e) { /* cache miss is non-fatal */ }
 
@@ -216,17 +229,20 @@ Respond as a single JSON object.`;
     const latency_ms = Date.now() - t0;
 
     // Persist: log every verification to the Inquiry entity.
-    // customer_id: these records are created via the request client from an
-    // x-api-key call with no Base44 session, so created_by_id is not the
-    // caller — customer_id is the only owner attribution these lineages get,
-    // and gateApi's side-effect gate reads it.
-    const inquiry = await base44.entities.Inquiry.create({
+    // Written via the service-role client so the write survives strict entity
+    // RLS — the sessionless request client only worked while create was forced
+    // open (commit 2d7dccd), and these calls carry no Base44 session either way.
+    // customer_id: these records are created service-role from an x-api-key
+    // call with no Base44 session, so created_by_id is not the caller —
+    // customer_id is the only owner attribution these lineages get, and
+    // gateApi's side-effect gate reads it.
+    const inquiry = await svc.entities.Inquiry.create({
       prompt: text.slice(0, 2000), domain: 'verification', stakes_level: 'medium', status: 'answered',
       customer_id: apiKey.user_id,
       description: `Webhook verification · verdict=${verdict} · trust=${trust_score} · ${latency_ms}ms`,
     });
     const claimsOut = claims.map((c) => ({ claim: c.claim, supported: !!c.supported, notes: c.notes || '' }));
-    const av = await base44.entities.AnswerVersion.create({
+    const av = await svc.entities.AnswerVersion.create({
       inquiry_id: inquiry.id, version: 1, answer_text: text.slice(0, 4000),
       cognitive_state: { source: 'webhook', verdict, latency_ms, claim_count: claims.length, correction_count: corrections.length, flags },
       metrics: { support_ratio: claims.length ? claimsOut.filter((c) => c.supported).length / claims.length : 0 },
@@ -234,7 +250,7 @@ Respond as a single JSON object.`;
     });
     const premises = claims.map((c) => c.claim).slice(0, 20);
     const conclusion = (v.summary || text.slice(0, 500));
-    const warrant = await base44.entities.Warrant.create({
+    const warrant = await svc.entities.Warrant.create({
       answer_version_id: av.id,
       premises,
       conclusion,
@@ -242,9 +258,10 @@ Respond as a single JSON object.`;
       validity_status: verdict === 'verified' ? 'valid' : verdict === 'contested' ? 'weak' : 'invalid',
       sources: [],
       expiry_date: new Date(Date.now() + 30 * 86400000).toISOString(),
+      service_mode_at_issuance: serviceMode.mode,
       description: `Webhook verification · ${verdict} · ${claims.length} claims · ${latency_ms}ms`,
     });
-    await base44.entities.AnswerVersion.update(av.id, { warrant_id: warrant.id }).catch(() => {});
+    await svc.entities.AnswerVersion.update(av.id, { warrant_id: warrant.id }).catch(() => {});
     // Dual-sign (§9.3): additive RFC 8785 canonical v2 signature — these
     // API-path warrants previously carried no signature at all. answer_text_sha256
     // hashes the answer text AS PERSISTED on the AnswerVersion row (the
@@ -262,7 +279,7 @@ Respond as a single JSON object.`;
         sources: [],
       }));
       if (v2) {
-        await base44.entities.Warrant.update(warrant.id, {
+        await svc.entities.Warrant.update(warrant.id, {
           schema_version: v2.schema_version, payload_hash_v2: v2.payload_hash_v2, signed_hash_v2: v2.signed_hash_v2, key_id_v2: v2.key_id, answer_text_sha256: answerTextSha256,
         });
       }
@@ -286,10 +303,10 @@ Respond as a single JSON object.`;
       JSON.stringify({ data: verification }),
     ).catch((e) => ({ ok: false, error: e?.message || 'network error' }));
     if (!sent.ok) {
-      return Response.json({ status: 'webhook_failed', webhook_error: sent.error, verification }, { status: 502 });
+      return Response.json({ status: 'webhook_failed', webhook_error: sent.error, verification, ...modeStamp }, { status: 502 });
     }
 
-    return Response.json({ status: 'webhook_sent', webhook_status: sent.status, verification });
+    return Response.json({ status: 'webhook_sent', webhook_status: sent.status, verification, ...modeStamp });
   } catch (error) {
     console.error('webhookVerify error', error);
     return Response.json({ error: error.message || 'verification failed' }, { status: 500 });
