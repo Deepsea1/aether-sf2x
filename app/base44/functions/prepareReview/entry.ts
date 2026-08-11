@@ -44,7 +44,11 @@ export default async function (req) {
     if (peeked.op !== undefined) return Response.json({ error: 'unknown op' }, { status: 400 });
 
     const base44 = createClientFromRequest(req);
-    const user = await base44.auth.me();
+    // Sessionless calls make auth.me() throw a raw platform error that the
+    // outer catch used to surface as a 500 — catch it so the 401 below fires.
+    // What counts as authorized is unchanged: no session, no repair run.
+    let user = null;
+    try { user = await base44.auth.me(); } catch { user = null; }
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (user.role !== 'admin') return Response.json({ error: 'Admin only' }, { status: 403 });
 
@@ -247,7 +251,12 @@ export default async function (req) {
 async function resolveReviewOp(req) {
   try {
     const base44 = createClientFromRequest(req);
-    const user = await base44.auth.me();
+    // Sessionless calls make auth.me() throw a raw platform error that this
+    // op's catch used to surface as a 500 — catch it so the 401 below fires.
+    // What counts as authorized is unchanged: session user, any role
+    // (deliberately NOT admin-gated — see the op comment above).
+    let user = null;
+    try { user = await base44.auth.me(); } catch { user = null; }
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     if (req.method !== 'POST') return Response.json({ error: 'Method not allowed' }, { status: 405 });
 
