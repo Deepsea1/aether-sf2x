@@ -69,10 +69,30 @@
           },
           "support_ratio": {
             "type": "number"
+          },
+          "id": {
+            "type": "string",
+            "description": "Corpus item id (e.g. T01, F03) so a run's items are traceable back to the versioned corpus."
+          },
+          "class": {
+            "type": "string",
+            "description": "Ground-truth class from the negative-control corpus: TRUE | FABRICATED | CORRUPTED | THIN_NEG. LOAD-BEARING — capabilityCard.generateCardData computes the §18.2 false-pass / false-block rates by partitioning on this field, and only counts a run where EVERY item carries it. It was absent from this schema until 2026-08-12, so Base44 stripped it on write and no stored run ever qualified: the capability card could never become measured and enforcing could never unlock."
+          },
+          "ground_truth": {
+            "type": "boolean",
+            "description": "Whether the item is true in fact — the label the trust score is scored against."
+          },
+          "caught": {
+            "type": "boolean",
+            "description": "Did the pipeline reach the correct disposition for this item? False-pass and false-block rates are computed from this; a missing value counts against us (fail closed)."
+          },
+          "error": {
+            "type": "string",
+            "description": "Execution error for this item, when one occurred (e.g. an exhausted integration quota). Its presence marks the run as an incomplete measurement — capabilityCard skips such runs rather than measuring an outage as verifier capability."
           }
         }
       },
-      "description": "Per-item results: the claim, its ground-truth label, and the SF2X trust/validity it received."
+      "description": "Per-item results: the claim, its ground-truth class and label, the SF2X trust/validity it received, whether the pipeline got it right, and any execution error. The class/caught/error trio is what makes a run measurable for the §18.2 capability card."
     },
     "run_type": {
       "type": "string",

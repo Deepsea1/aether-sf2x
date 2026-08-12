@@ -113,6 +113,51 @@ test('no stored negative-control run → every rate null on both cards', async (
   assert.equal(enforcingAllowed(docs).allowed, false, 'technical-docs card must fail the gate while unmeasured');
 });
 
+test('a run whose items carry errors is NOT a measurement — rates stay null', async () => {
+  // The live case (2026-08-12): a gate-2 run executed while Base44 integration
+  // credits were exhausted. Every TRUE claim errored with "You have reached the
+  // limit of integrations for this month", so all 10 came back caught:false.
+  // Measured naively that reads as a 100% false-block rate — which would be a
+  // measurement of an outage, not of the verifier. Absent measurement is null.
+  const brokenRun = {
+    id: 'broken1',
+    dataset: 'negctl-v1',
+    items: [
+      { class: 'TRUE', caught: false, error: 'You have reached the limit of integrations for this month' },
+      { class: 'TRUE', caught: false, error: 'You have reached the limit of integrations for this month' },
+      { class: 'FABRICATED', caught: true },
+    ],
+  };
+  const [general] = await generateCardData(svcWithAudits([brokenRun]));
+  assert.equal(general.false_block_rate_by_risk.high, null, 'an errored run must not produce a false-block rate');
+  assert.equal(general.false_pass_rate_by_risk.high, null);
+  assert.deepEqual(general.benchmark_refs, []);
+  assert.ok(
+    general.known_limitations.some((l) => /error|outage|incomplete/i.test(l)),
+    `limitations must say why nothing was measured: ${general.known_limitations.join(' | ')}`,
+  );
+});
+
+test('a clean run is still preferred over a newer errored one', async () => {
+  const cleanRun = {
+    id: 'clean1',
+    dataset: 'negctl-v1',
+    items: [
+      { class: 'TRUE', caught: true },
+      { class: 'FABRICATED', caught: true },
+    ],
+  };
+  const brokenRun = {
+    id: 'broken2',
+    dataset: 'negctl-v1',
+    items: [{ class: 'TRUE', caught: false, error: 'integration limit' }],
+  };
+  // list() returns newest-first, so the errored run is seen first and skipped.
+  const [general] = await generateCardData(svcWithAudits([brokenRun, cleanRun]));
+  assert.equal(general.false_block_rate_by_risk.high, 0);
+  assert.deepEqual(general.benchmark_refs, ['clean1']);
+});
+
 test('rates computed from the latest class-labeled run; unlabeled rows never qualify', async () => {
   const negRun = {
     id: 'run1',

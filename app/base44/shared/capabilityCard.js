@@ -123,8 +123,17 @@ export async function generateCardData(svc) {
   // carry a class label (runNegativeControls output). runCorrelationAudit's
   // representative-sample rows have no class field and never qualify.
   const rows = await svc.entities.CorrelationAudit.list('-created_date', 25).catch(() => []);
-  const negRun = (rows || []).find((r) => Array.isArray(r?.items) && r.items.length > 0
-    && r.items.every((i) => typeof ((i || {}).class) === 'string')) || null;
+  // A run is only a MEASUREMENT if every item actually ran. An item carrying an
+  // `error` did not produce a verdict — it produced an outage. Measured naively,
+  // a credit-exhausted run (observed live 2026-08-12: every TRUE claim errored
+  // with "You have reached the limit of integrations for this month") reads as a
+  // 100% false-block rate and would mint a card claiming the verifier blocks
+  // everything. Skip errored runs entirely and fall through to the next clean
+  // one; if none exists, every rate stays null and the §18.2 gate stays locked.
+  const labeled = (rows || []).filter((r) => Array.isArray(r?.items) && r.items.length > 0
+    && r.items.every((i) => typeof ((i || {}).class) === 'string'));
+  const erroredSkipped = labeled.filter((r) => r.items.some((i) => (i || {}).error)).length;
+  const negRun = labeled.find((r) => r.items.every((i) => !(i || {}).error)) || null;
 
   let falsePass = null;
   let falseBlock = null;
@@ -151,7 +160,9 @@ export async function generateCardData(svc) {
       `Card expires ${GENERAL_CARD_TTL_DAYS} days after generation; regenerate from a fresh negative-control run to renew.`,
     ]
     : [
-      'No stored negative-control run found — every rate on this card is null until one exists. Absent measurement is never replaced with an estimate.',
+      erroredSkipped > 0
+        ? `No usable negative-control run: ${erroredSkipped} stored run(s) were skipped because items carried execution errors (an incomplete run measures the outage, not the verifier). Every rate stays null until a clean run exists.`
+        : 'No stored negative-control run found — every rate on this card is null until one exists. Absent measurement is never replaced with an estimate.',
       'extraction_recall, evidence_alignment_rate and citation_integrity_rate have no stored measurement — null, never estimated.',
       `Card expires ${GENERAL_CARD_TTL_DAYS} days after generation; regenerate from a fresh negative-control run to renew.`,
     ];
