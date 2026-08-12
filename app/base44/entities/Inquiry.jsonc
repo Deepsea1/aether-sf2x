@@ -89,10 +89,19 @@
         }
       ]
     },
+    // customer_id is load-bearing here, not decoration: API-path inquiries are
+    // created service-role with a null created_by_id, so their owner is
+    // data.customer_id (same reason read carries it). A created_by_id-only
+    // update rule would silently no-op the legitimate owner's own escalate-to-
+    // review action from Home.jsx / Systems.jsx — both swallow the error, so it
+    // would degrade invisibly rather than fail loudly.
     "update": {
       "$or": [
         {
           "created_by_id": "{{user.id}}"
+        },
+        {
+          "data.customer_id": "{{user.id}}"
         },
         {
           "user_condition": {
