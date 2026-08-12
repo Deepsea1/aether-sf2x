@@ -507,8 +507,13 @@ All in `base44/functions/<name>/entry.ts`. Deno runtime, TypeScript.
 ### GitHub Integration
 | Function | Description |
 |----------|-------------|
-| `githubPrVerify` | **PR verification** — extract claims from diff, Aether Flash scan, policy eval, commit status, inline PR review annotations |
-| `githubStatusCheck` | Post a commit status based on trust score |
+| `githubPrVerify` | **PR verification** — extract claims from diff, Aether Flash scan, policy eval, commit status, inline PR review annotations. Capability-split auth: the GitHub-touching half (fetch a PR diff, write commit status, post review) is admin-only because it spends Aether's platform GitHub connector; any signed-in caller can analyse a pasted `diff_text`. |
+
+`githubStatusCheck` was removed — it had no caller anywhere (no code, workflow, agent, MCP or SDK
+reference), its behaviour was a subset of `githubPrVerify`'s `setCommitStatus`, and its trust-score
+→ pass/fail mapping is already the shipped Action's `gate.mjs`. It was a second independent path to
+the platform GitHub token for no benefit. Customers gate their own repositories with the Action,
+which uses their repo-scoped `GITHUB_TOKEN`.
 
 ### Governance & Escalation
 | Function | Description |

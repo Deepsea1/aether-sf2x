@@ -299,7 +299,16 @@ export default function GitHubPrVerify() {
       .finally(() => setLoadingUser(false));
   }, []);
 
+  const isAdmin = user?.role === 'admin';
+
   const handleVerify = async () => {
+    // Fetching a diff from GitHub spends Aether's connector token, so it is
+    // admin-only on the backend. Catch it here rather than posting a request
+    // that is guaranteed to come back 400.
+    if (!isAdmin && !diffText.trim()) {
+      setError('Paste a diff to verify. Fetching it from GitHub requires an admin account — to gate your own repository, use the Aether GitHub Action.');
+      return;
+    }
     if (!diffText.trim() && (!owner || !repo)) {
       setError('Provide a diff text or owner + repo to fetch from GitHub.');
       return;
@@ -319,7 +328,9 @@ export default function GitHubPrVerify() {
         domain,
       };
       if (diffText.trim()) payload.diff_text = diffText;
-      if (pullNumber) payload.pull_number = parseInt(pullNumber, 10);
+      // pull_number asks the backend to fetch through Aether's connector — a 403
+      // for non-admins, so never send it from a demo run.
+      if (pullNumber && isAdmin) payload.pull_number = parseInt(pullNumber, 10);
       if (policyYaml.trim()) payload.policy_yaml = policyYaml;
 
       const res = await base44.functions.invoke('githubPrVerify', payload);
@@ -338,34 +349,17 @@ export default function GitHubPrVerify() {
 + The API currently handles 1.2 million requests per second.
 + This implementation is fully compliant with GDPR and HIPAA requirements.`;
 
-  // The backing function is admin-gated: it spends Aether's own GitHub connector
-  // token against whatever owner/repo is submitted, so it cannot be opened to
-  // every signed-in visitor (see base44/functions/githubPrVerify/entry.ts). Say
-  // so here instead of letting the form collect a diff and return a raw 403.
+  // Non-admins get the real analysis on a pasted diff; only the GitHub-touching
+  // half (fetch a PR, write a commit status, post a review) is admin-held,
+  // because that half spends Aether's own connector token. See
+  // base44/functions/githubPrVerify/entry.ts for why the split is by capability
+  // rather than by role.
   if (loadingUser) {
     return (
       <div className="min-h-screen bg-[#070A0F]">
         <PublicNav />
         <div className="flex items-center justify-center py-20 text-slate-500">
           <Loader2 className="h-6 w-6 animate-spin" />
-        </div>
-      </div>
-    );
-  }
-
-  if (user?.role !== 'admin') {
-    return (
-      <div className="min-h-screen bg-[#070A0F]">
-        <PublicNav />
-        <div className="mx-auto max-w-xl px-4 sm:px-6 text-center py-20">
-          <ShieldCheck className="h-8 w-8 text-slate-500 mx-auto mb-3" />
-          <h1 className="font-heading text-xl font-semibold text-white">Admin only</h1>
-          <p className="text-sm text-slate-400 mt-2">
-            PR verification writes commit statuses and PR reviews through Aether's own GitHub
-            connector, so it requires an admin account. To run the gate on your own repository,
-            use the <a href="/github-action" className="text-emerald-400 hover:underline">Aether GitHub Action</a> with
-            your API key.
-          </p>
         </div>
       </div>
     );
@@ -385,6 +379,21 @@ export default function GitHubPrVerify() {
             Extract claims from a GitHub PR diff, run Aether Flash deterministic risk detection, and evaluate each claim against your repo's <code className="text-slate-400">.aether/policy.yml</code>.
           </p>
         </div>
+
+        {!isAdmin && (
+          <div className="border border-emerald-400/20 bg-emerald-400/[0.04] rounded-xl p-4 flex gap-3">
+            <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+            <div className="text-sm text-slate-300">
+              <span className="font-medium text-white">Paste a diff to run the full analysis.</span>{' '}
+              Claim extraction, Flash risk detection, policy evaluation and dispositions all run here.
+              Fetching a PR from GitHub, posting a commit status, and posting a review use Aether's own
+              GitHub connector, so they are admin-only — to gate your own repository, use the{' '}
+              <a href="/github-action" className="text-emerald-400 hover:underline">Aether GitHub Action</a>,
+              which runs in your CI with your own repo token. Cited URLs are not fetched on this tier,
+              so evidence stays unverified.
+            </div>
+          </div>
+        )}
 
         {/* Input form */}
         <div className="border border-white/10 rounded-xl p-5 space-y-4 bg-white/[0.02]">
@@ -410,13 +419,17 @@ export default function GitHubPrVerify() {
               />
             </div>
             <div>
-              <label htmlFor="pr" className="block text-xs font-medium text-slate-400 mb-1.5">PR Number</label>
+              <label htmlFor="pr" className="block text-xs font-medium text-slate-400 mb-1.5">
+                PR Number {!isAdmin && <span className="text-slate-600">· admin only</span>}
+              </label>
               <input
                 id="pr"
                 value={pullNumber}
                 onChange={(e) => setPullNumber(e.target.value)}
-                placeholder="42"
-                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:border-emerald-400/50 focus:outline-none"
+                disabled={!isAdmin}
+                title={isAdmin ? undefined : "Fetching a PR diff uses Aether's GitHub connector — paste the diff instead"}
+                placeholder={isAdmin ? '42' : 'paste the diff instead'}
+                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:border-emerald-400/50 focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
               />
             </div>
           </div>

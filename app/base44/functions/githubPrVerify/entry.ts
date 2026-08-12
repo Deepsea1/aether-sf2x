@@ -34,7 +34,7 @@
 // authorized, callers pass diff_text and we set the status (which we CAN do).
 
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { requireAdmin } from '../../shared/auth.js';
+import { resolveGithubCapability, evidenceFetchBudget } from '../../shared/githubCapability.js';
 import { extractClaimsFromDiff, extractClaims } from '../../shared/claimExtractor.js';
 import { flashScanBatch } from '../../shared/aetherFlash.js';
 import { parsePolicyYaml, evaluatePolicy, computePolicyHash } from '../../shared/policyParser.js';
@@ -83,26 +83,37 @@ release_gate:
 // effective model id so cached deterministic verdicts can never satisfy it.
 const EVAL_MODEL = 'deterministic';
 
-// ADMIN ONLY — the same confused-deputy reasoning spelled out in
-// githubStatusCheck/entry.ts: the connector token is Aether's own GitHub
-// identity and owner/repo arrive in the request body, so a bare authenticated
-// check let any signed-up account spend that token against any repo it can
-// reach. This function is strictly the more dangerous of the two, because
-// beyond writing it also READS through that token — the PR diff and the repo's
-// .aether/policy.yml — and returns claim text extracted from that diff in its
-// response, which turns it into a cross-repo read primitive; and it posts PR
-// reviews (up to request_changes) under Aether's name.
+// CAPABILITY-SPLIT AUTH — the boundary is what a request TOUCHES, not who is
+// asking. Exactly three things here reach Aether's own GitHub connector token:
+// fetching the PR diff, fetching the repo's .aether/policy.yml, and writing
+// back (commit status + PR review). The demo this endpoint's page exists for —
+// paste a diff, watch Aether find the unsupported claims — touches none of them.
 //
-// entities/Claim.jsonc describes this as an "authenticated per-customer
-// endpoint". That intent is not reachable yet: it needs a per-installation
-// credential or a repo-entitlement record so a customer can be scoped to their
-// own repos, and neither exists today. Admin-gated until one does.
+// So a non-admin caller never acquires the token at all. It is not that the
+// GitHub calls are permission-checked at each call site; there is no credential
+// in scope to make them with, and every GitHub helper below already no-ops on a
+// null token. Structural unreachability beats a role check you can forget to
+// repeat, and it is what lets /github-pr-verify stay in the public nav.
+//
+// Admin (which per shared/auth.js also covers the platform workflow principal)
+// gets the full path: token acquired, diff and policy fetched, status and
+// review written.
+//
+// Why the token is not simply scoped to the caller's own repos: Base44
+// connectors are a single platform-wide connection, so there is no per-customer
+// GitHub credential, and no repo-entitlement record exists in the entity set.
+// Before this split, a bare "is there a user" check made this a confused deputy
+// — any signed-up account could spend Aether's GitHub identity against any repo
+// that token could reach, reading private PR diffs (returned as extracted claim
+// text) and posting reviews up to request_changes under Aether's name.
+// Customers who want the gate on their own repository run the Action, which
+// uses their repo-scoped GITHUB_TOKEN and never needs ours.
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
-    const auth = await requireAdmin(base44);
-    if (!auth.ok) return auth.response;
-    const user = auth.user;
+    let user = null;
+    try { user = await base44.auth.me(); } catch { /* fall through to the 401 */ }
+    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     if (req.method !== 'POST') return Response.json({ error: 'Method not allowed' }, { status: 405 });
     const body = await req.json().catch(() => ({}));
@@ -117,16 +128,34 @@ export default async function(req) {
       return Response.json({ error: `${invalidPathField} is invalid` }, { status: 400 });
     }
 
+    // Demo tier: no token in scope, so the request must carry its own diff and
+    // cannot ask for a PR fetch. The refusals say WHY and name the path that
+    // does work on the caller's own repo. Decision lives in shared/ so it is
+    // unit-tested (shared/tests/githubCapability.test.mjs).
+    const capability = resolveGithubCapability({
+      role: user.role,
+      pullNumber: pull_number,
+      diffText: diff_text,
+    });
+    if (!capability.ok) {
+      return Response.json({ error: capability.error }, { status: capability.status });
+    }
+    const isAdmin = capability.isAdmin;
+
     const traceId = newTraceId();
     const svc = base44.asServiceRole;
     const tenant_id = user.id;
 
-    // Get the GitHub connector token.
+    // Get the GitHub connector token — admin callers only. A demo run leaves
+    // this null, which is what makes every GitHub read and write below a no-op
+    // rather than a permission check (see the header).
     let accessToken = null;
-    try {
-      const conn = await svc.connectors.getConnection('github');
-      accessToken = conn.accessToken;
-    } catch { /* connector not connected — caller must provide diff_text */ }
+    if (isAdmin) {
+      try {
+        const conn = await svc.connectors.getConnection('github');
+        accessToken = conn.accessToken;
+      } catch { /* connector not connected — caller must provide diff_text */ }
+    }
 
     // ---- Fetch the PR diff (if pull_number provided and we have a token) ----
     let diff = diff_text || '';
@@ -196,17 +225,22 @@ export default async function(req) {
     policy.policy_hash = await computePolicyHash(policy);
     policy.status = 'active';
 
-    // Persist the policy (if it's new or changed).
+    // Persist the policy (if it's new or changed) — admin runs only. policy_yaml
+    // is caller-supplied and each distinct YAML hashes to a new row, so
+    // persisting demo runs would let any signup mint Policy rows at will.
+    // policyRecord is not read downstream; the run uses `policy` itself.
     let policyRecord = null;
-    try {
-      const existing = await svc.entities.Policy.filter({ policy_hash: policy.policy_hash }, '-created_date', 1);
-      if (existing && existing.length) {
-        policyRecord = existing[0];
-      } else {
-        policyRecord = await svc.entities.Policy.create(policy);
+    if (isAdmin) {
+      try {
+        const existing = await svc.entities.Policy.filter({ policy_hash: policy.policy_hash }, '-created_date', 1);
+        if (existing && existing.length) {
+          policyRecord = existing[0];
+        } else {
+          policyRecord = await svc.entities.Policy.create(policy);
+        }
+      } catch (e) {
+        console.error('Policy persist failed:', e?.message || e);
       }
-    } catch (e) {
-      console.error('Policy persist failed:', e?.message || e);
     }
 
     // ---- Extract claims from the diff ----
@@ -298,6 +332,7 @@ export default async function(req) {
         claims_reused: 0,
         resolver_version: RESOLVER_VERSION,
         advisory_mode: advisoryMode,
+        github_operations_enabled: isAdmin,
         gate_reasons: gateNotes,
         ...modeStamp,
       });
@@ -426,9 +461,12 @@ export default async function(req) {
     // deterministic applicability v1 assessment. Fetches are capped per run
     // with an explicit note — no silent truncation — and failures never crash
     // the run: evidence is input to the resolver, not a gate on the function.
-    const maxEvidenceFetches = Number.isFinite(Number(policy.max_evidence_fetches)) && Number(policy.max_evidence_fetches) > 0
-      ? Number(policy.max_evidence_fetches)
-      : 10;
+    // Demo runs fetch nothing outbound. Grounding is the one part of this
+    // pipeline that makes network calls on caller-supplied input, so leaving it
+    // on for unmetered signups would be the abuse vector this split otherwise
+    // closes — there is no quota module in shared/ to meter it with. A demo run
+    // is therefore pure local computation, and says so in notes below.
+    const maxEvidenceFetches = evidenceFetchBudget(isAdmin, policy.max_evidence_fetches);
     const snapshotCache = new Map();
     let fetchBudget = maxEvidenceFetches;
     let fetchesCapped = false;
@@ -476,7 +514,9 @@ export default async function(req) {
         }
       }
     }
-    if (fetchesCapped) {
+    if (!isAdmin) {
+      runNotes.push('demo run: citation evidence was not fetched — outbound grounding is an admin capability, so cited URLs are unverified here and every claim is scored on extraction and policy alone');
+    } else if (fetchesCapped) {
       runNotes.push(`evidence_fetches_capped: citation fetches limited to ${maxEvidenceFetches} per run — remaining cited URLs were not fetched`);
     }
 
@@ -651,6 +691,7 @@ export default async function(req) {
         resolver_version: RESOLVER_VERSION,
         advisory_mode: advisoryMode,
         service_mode: serviceMode.mode,
+        github_operations_enabled: isAdmin,
         dispositions: dispositionCounts,
         reviews_created: reviewHandoff.created,
         notes: runNotes,
@@ -720,6 +761,7 @@ export default async function(req) {
       claims_found: totalClaimsFound,
       resolver_version: RESOLVER_VERSION,
       advisory_mode: advisoryMode,
+      github_operations_enabled: isAdmin,
       ...modeStamp,
       dispositions: dispositionCounts,
       reviews: reviewHandoff,
