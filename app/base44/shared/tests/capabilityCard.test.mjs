@@ -55,6 +55,26 @@ test('unmeasured extraction recall locks even with clean false-block rates', () 
   assert.ok(out.reasons.some((r) => r.includes('extraction_recall')));
 });
 
+test('a MEASURED but inadequate extraction recall still locks the gate', () => {
+  // The gate originally only asked whether extraction_recall existed. Measuring
+  // the shipped extractor produced 0.4091 — it finds fewer than half the
+  // material claims — and a mere is-it-measured check would have accepted that
+  // as satisfied and unlocked on it. A claim that is never extracted is never
+  // verified and never blocked, so low recall silently voids every other number
+  // on the card. Presence is not adequacy.
+  const out = enforcingAllowed(measuredCard({ extraction_recall: 0.4091 }));
+  assert.equal(out.allowed, false);
+  assert.ok(
+    out.reasons.some((r) => r.includes('extraction_recall') && r.includes('below')),
+    `expected a below-threshold reason, got: ${out.reasons.join(' | ')}`,
+  );
+});
+
+test('extraction recall at the threshold unlocks; a hair under does not', () => {
+  assert.equal(enforcingAllowed(measuredCard({ extraction_recall: 0.80 })).allowed, true);
+  assert.equal(enforcingAllowed(measuredCard({ extraction_recall: 0.7999 })).allowed, false);
+});
+
 test('expired card lists EVERY failing reason, not just the first wall', () => {
   const out = enforcingAllowed(measuredCard({
     expires_at: PAST,
@@ -109,7 +129,12 @@ test('no stored negative-control run → every rate null on both cards', async (
     assert.equal(general.false_block_rate_by_risk[tier], null);
     assert.equal(docs.false_block_rate_by_risk[tier], null);
   }
-  assert.equal(general.extraction_recall, null);
+  // extraction_recall is NOT null any more: it is recomputed deterministically
+  // from the shipped gold corpus on every generation, independent of whether a
+  // negative-control run exists. It is measured but below the minimum, so the
+  // gate stays locked either way.
+  assert.equal(typeof general.extraction_recall, 'number');
+  assert.ok(general.extraction_recall < 1);
   assert.equal(enforcingAllowed(docs).allowed, false, 'technical-docs card must fail the gate while unmeasured');
 });
 
@@ -131,7 +156,9 @@ test('a run whose items carry errors is NOT a measurement — rates stay null', 
   const [general] = await generateCardData(svcWithAudits([brokenRun]));
   assert.equal(general.false_block_rate_by_risk.high, null, 'an errored run must not produce a false-block rate');
   assert.equal(general.false_pass_rate_by_risk.high, null);
-  assert.deepEqual(general.benchmark_refs, []);
+  // The corpus ref is always present (extraction recall is always computed);
+  // what must be absent is any reference to the errored run.
+  assert.ok(!general.benchmark_refs.includes('broken1'), 'an errored run must never be cited');
   assert.ok(
     general.known_limitations.some((l) => /error|outage|incomplete/i.test(l)),
     `limitations must say why nothing was measured: ${general.known_limitations.join(' | ')}`,
@@ -155,7 +182,8 @@ test('a clean run is still preferred over a newer errored one', async () => {
   // list() returns newest-first, so the errored run is seen first and skipped.
   const [general] = await generateCardData(svcWithAudits([brokenRun, cleanRun]));
   assert.equal(general.false_block_rate_by_risk.high, 0);
-  assert.deepEqual(general.benchmark_refs, ['clean1']);
+  assert.ok(general.benchmark_refs.includes('clean1'));
+  assert.ok(!general.benchmark_refs.includes('broken2'), 'the errored run must not be cited');
 });
 
 test('rates computed from the latest class-labeled run; unlabeled rows never qualify', async () => {
@@ -177,7 +205,7 @@ test('rates computed from the latest class-labeled run; unlabeled rows never qua
   assert.equal(general.false_pass_rate_by_risk.high, 0.3333);
   // false block: 1 of 2 true claims failed → 0.5
   assert.equal(general.false_block_rate_by_risk.high, 0.5);
-  assert.deepEqual(general.benchmark_refs, ['run1']);
+  assert.ok(general.benchmark_refs.includes('run1'));
   // measurement gaps make the card worse, never better — stated in limitations
   assert.ok(general.known_limitations.some((l) => l.includes('n=6')));
 });

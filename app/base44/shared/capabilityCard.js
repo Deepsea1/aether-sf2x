@@ -13,6 +13,9 @@
 //   const cards = await generateCardData(svc);                     // [general-verify, technical-docs@1.0] row data
 
 import { PIPELINE_VERSION } from './verdictReuse.js';
+import { scoreExtractionRecall } from './extractionRecall.js';
+import { EXTRACTION_GOLD_V1, EXTRACTION_GOLD_VERSION } from './extractionGold-v1.js';
+import { extractClaims } from './claimExtractor.js';
 
 // §18.1 risk tiers — the by-risk rate objects carry exactly these keys.
 export const RISK_TIERS = ['low', 'moderate', 'high', 'critical'];
@@ -21,6 +24,12 @@ export const RISK_TIERS = ['low', 'moderate', 'high', 'critical'];
 // rate at or under these for the high and critical tiers.
 const FALSE_BLOCK_HIGH_MAX = 0.10;
 const FALSE_BLOCK_CRITICAL_MAX = 0.05;
+
+// §6.3 does not name a number, so this is a judgement stated in the open rather
+// than hidden: blocking a customer's build on a verifier that finds under 80%
+// of material claims is indefensible, because the claims it missed pass
+// unchallenged while the ones it caught carry the authority of a gate.
+export const EXTRACTION_RECALL_MIN = 0.80;
 
 // The measured general-verify card expires so stale numbers cannot gate
 // forever — regenerate from a fresh run to renew.
@@ -93,7 +102,16 @@ export function enforcingAllowed(card) {
   else if (fb.high > FALSE_BLOCK_HIGH_MAX) reasons.push(`false_block_rate_by_risk.high ${fb.high} exceeds the ${FALSE_BLOCK_HIGH_MAX} threshold`);
   if (!isMeasured(fb.critical)) reasons.push('false_block_rate_by_risk.critical is not measured');
   else if (fb.critical > FALSE_BLOCK_CRITICAL_MAX) reasons.push(`false_block_rate_by_risk.critical ${fb.critical} exceeds the ${FALSE_BLOCK_CRITICAL_MAX} threshold`);
+  // Extraction recall is measured AND adequate, in that order. Presence alone
+  // was the original check, and measuring the shipped extractor showed why that
+  // is not enough: it scored 0.4091 — fewer than half the material claims — and
+  // an is-it-measured check would have accepted that as satisfied. A claim that
+  // is never extracted is never verified, never contradicted, and never
+  // blocked, so low recall silently voids every other number on this card.
   if (!isMeasured(card.extraction_recall)) reasons.push('extraction_recall is not measured');
+  else if (card.extraction_recall < EXTRACTION_RECALL_MIN) {
+    reasons.push(`extraction_recall ${card.extraction_recall} is below the ${EXTRACTION_RECALL_MIN} minimum — the majority of material claims must be found before any of them may be hard-blocked`);
+  }
   return { allowed: reasons.length === 0, reasons };
 }
 
@@ -117,6 +135,21 @@ export function enforcingAllowed(card) {
 // gold alignment labels), so they are null on BOTH cards — never estimated.
 export async function generateCardData(svc) {
   const nowIso = new Date().toISOString();
+
+  // §6.3 extraction recall — recomputed here rather than read from storage.
+  // The extractor is deterministic and the gold corpus ships with the app, so
+  // the number is reproducible from source at any time and can never go stale
+  // against the extractor it describes. Wrapped: a scorer failure must leave
+  // recall null (unmeasured, gate stays closed), never silently zero or high.
+  let extraction = { recall: null, distinct_unit_rate: null, n_gold: 0, n_cases: 0 };
+  try {
+    extraction = scoreExtractionRecall(EXTRACTION_GOLD_V1, (t) => extractClaims(t));
+  } catch (e) {
+    console.error('extraction recall scoring failed:', e?.message || e);
+  }
+  const extractionLimitation = extraction.recall === null
+    ? 'extraction_recall could not be computed — null, never estimated.'
+    : `extraction_recall ${extraction.recall} measured on ${EXTRACTION_GOLD_VERSION} (${extraction.n_gold} material claims across ${extraction.n_cases} cases, deterministic extractor). distinct_unit_rate ${extraction.distinct_unit_rate}: the share of claims that get their OWN verification unit — the remainder share a unit with another claim and therefore share its verdict.`;
   const generalExpiry = new Date(Date.now() + GENERAL_CARD_TTL_DAYS * 86400000).toISOString();
 
   // Latest negative-control run: newest CorrelationAudit row whose items all
@@ -156,14 +189,16 @@ export async function generateCardData(svc) {
       `Measured on the internal negative-control suite only (${negRun.dataset || 'negative-control run'}, n=${negRun.items.length}: ${negatives.length} fabricated/corrupted · ${trues.length} true · ${thins.length} thin-coverage) — not an independent benchmark.`,
       'The suite is not risk-stratified: every by-risk value is the single suite-wide aggregate stated per tier, not a per-tier measurement.',
       'False-pass proxy = fabricated/corrupted claims the pipeline passed; false-block proxy = true claims it failed. Thin-coverage abstention probes are excluded from both.',
-      'extraction_recall, evidence_alignment_rate and citation_integrity_rate have no stored measurement — null, never estimated.',
+      extractionLimitation,
+      'evidence_alignment_rate and citation_integrity_rate have no measurement — null, never estimated.',
       `Card expires ${GENERAL_CARD_TTL_DAYS} days after generation; regenerate from a fresh negative-control run to renew.`,
     ]
     : [
       erroredSkipped > 0
         ? `No usable negative-control run: ${erroredSkipped} stored run(s) were skipped because items carried execution errors (an incomplete run measures the outage, not the verifier). Every rate stays null until a clean run exists.`
         : 'No stored negative-control run found — every rate on this card is null until one exists. Absent measurement is never replaced with an estimate.',
-      'extraction_recall, evidence_alignment_rate and citation_integrity_rate have no stored measurement — null, never estimated.',
+      extractionLimitation,
+      'evidence_alignment_rate and citation_integrity_rate have no measurement — null, never estimated.',
       `Card expires ${GENERAL_CARD_TTL_DAYS} days after generation; regenerate from a fresh negative-control run to renew.`,
     ];
 
@@ -181,10 +216,10 @@ export async function generateCardData(svc) {
       'automatic enforcement decisions while the §18.2 gate is locked',
     ],
     known_limitations: generalLimitations,
-    benchmark_refs: negRun ? [negRun.id] : [],
+    benchmark_refs: negRun ? [negRun.id, EXTRACTION_GOLD_VERSION] : [EXTRACTION_GOLD_VERSION],
     false_pass_rate_by_risk: byRisk(falsePass),
     false_block_rate_by_risk: byRisk(falseBlock),
-    extraction_recall: null,
+    extraction_recall: extraction.recall,
     evidence_alignment_rate: null,
     citation_integrity_rate: null,
     valid_from: nowIso,
@@ -202,11 +237,12 @@ export async function generateCardData(svc) {
     known_limitations: [
       "The wedge's deterministic path has NO measured false-block rate yet — every rate on this card is null until a wedge-specific measurement exists.",
       'This card deliberately fails the §18.2 enforcing gate: advisory is the only honest mode for this pack today.',
+      extractionLimitation,
     ],
-    benchmark_refs: [],
+    benchmark_refs: [EXTRACTION_GOLD_VERSION],
     false_pass_rate_by_risk: byRisk(null),
     false_block_rate_by_risk: byRisk(null),
-    extraction_recall: null,
+    extraction_recall: extraction.recall,
     evidence_alignment_rate: null,
     citation_integrity_rate: null,
     valid_from: nowIso,
