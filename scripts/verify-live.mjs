@@ -68,7 +68,10 @@ const probes = [
   // ── A. Public transparency (P2/P3 + §20 eligibility rail) ──────────────────
   {
     id: 'A1', name: 'registry default: append-only log + merkle root', run: async () => {
-      const r = await call('warrantRegistry', { body: { limit: 5 } });
+      // limit 25, not 5: the chain projection only carries signed_hash for
+      // legacy-signed rows, and a burst of v2-only warrants can fill the first
+      // page — A7 needs at least one legacy row to harvest.
+      const r = await call('warrantRegistry', { body: { limit: 25 } });
       if (r.status !== 200) throw new Error(`status ${r.status}`);
       if (r.json?.registry !== 'sf2x_warrants') throw new Error('registry tag missing');
       if (typeof r.json.root !== 'string' || !Array.isArray(r.json.chain)) throw new Error('root/chain missing');
@@ -268,6 +271,12 @@ const probes = [
       const r = await call('verifyAnswer', { body: { answer_version_id: ctx.lineageId } });
       if (r.status !== 200) throw new Error(`status ${r.status}`);
       if (typeof r.json?.signature_valid !== 'boolean') throw new Error('signature_valid missing');
+      // A v2-signed warrant MUST verify on the public proof surface. Reporting
+      // signature_valid:false for a correctly signed warrant is the inverse of
+      // the honesty law — it makes a real proof look forged.
+      if (r.json.signature_valid !== true) {
+        throw new Error(`public proof reports signature_valid:false (scheme '${r.json.signature_scheme}') for a warrant this pipeline just signed`);
+      }
       return `scheme ${r.json.signature_scheme} · signature_valid ${r.json.signature_valid} · ${r.json.certification}`;
     },
   },
