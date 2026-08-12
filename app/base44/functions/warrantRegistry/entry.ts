@@ -5,7 +5,7 @@ import { secrets } from 'base44:runtime';
 import { verifySignature, signatureScheme } from './sf2xVerify.ts';
 import { WARRANT_SCHEMA_V2, jcsCanonicalize, sha256Hex, buildWarrantV2Payload, verifyWarrantV2, signWarrantV2, publicKeyId } from '../../shared/canonicalSign.js';
 import { generateSignature } from '../../shared/sf2xCore.js';
-import { merkleRoot, inclusionProof } from '../../shared/merkle.js';
+import { merkleRoot, inclusionProof, consistencyProof, MERKLE_ALGORITHM } from '../../shared/merkle.js';
 import { checkEligibility } from '../../shared/displayEligibility.js';
 
 // Public, read-only Warrant Registry — an append-only transparency log. Anyone
@@ -18,9 +18,11 @@ import { checkEligibility } from '../../shared/displayEligibility.js';
 // CONSOLIDATED OPS (the platform's 50-function cap): this function also hosts
 // the parked aetherKeys + transparencyCheckpoint capabilities. body.op — or
 // ?op= in the URL query string, so plain GETs work — selects 'keys' |
-// 'checkpoint' | 'checkpoint_create'; an unknown op is a 400 fail-closed; no
-// op at all is the original registry behavior below, unchanged. op=eligibility
-// (P4 §20) is the display-eligibility rail — see its block below.
+// 'checkpoint' | 'checkpoint_create' | 'consistency'; an unknown op is a 400
+// fail-closed; no op at all is the original registry behavior below,
+// unchanged. op=consistency issues RFC 6962 consistency proofs between two
+// published tree heads (the append-only guarantee). op=eligibility (P4 §20) is
+// the display-eligibility rail — see its block below.
 
 async function sha256hex(text) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(text ?? '')));
@@ -113,18 +115,18 @@ async function opKeys() {
 // gate — human admins and workflow runs alike). Heads are append-only: never
 // updated, never deleted.
 //
-// CONSISTENCY HONESTY: v1 stores heads and prev_root chain links but does NOT
-// produce RFC 6962 consistency proofs between heads — a verifier can recompute
-// any single head's root from the full chain listing, and can see that heads
-// link, but cannot yet prove append-only growth between two heads from the
-// heads alone. Flagged as the follow-up in the response note + API_REFERENCE.
+// CONSISTENCY: heads carry signed prev_root chain links, AND op=consistency
+// (below) issues RFC 6962 §2.1.2 consistency proofs between any two published
+// heads — so append-only growth between checkpoints is provable from the heads
+// alone, not merely asserted by the link. A prev_root link says "I claim B
+// follows A"; the consistency proof is what makes that claim checkable.
 
 const TREEHEAD_SCHEMA = 'aether.treehead.v1';
 const PAGE_SIZE = 500;
 // Hard ceiling mirroring ledgerIntegrityCheck — a runaway-pager guard. A log
 // larger than this fails closed (no head is created), never truncates silently.
 const MAX_LEAVES = 50000;
-const TREEHEAD_NOTE = 'Append-only signed tree heads over the FULL warrant log. v1 stores prev_root chain links but not RFC 6962 consistency proofs between heads — verify a head by recomputing the full-log root from the warrantRegistry chain listing, or trust-on-inclusion via a warrantRegistry inclusion proof. Consistency proofs between heads are a flagged follow-up.';
+const TREEHEAD_NOTE = 'Append-only signed tree heads over the FULL warrant log. Heads carry signed prev_root chain links, and op=consistency issues RFC 6962 (§2.1.2) consistency proofs between any two published heads — proving the later tree is an append of the earlier one, so append-only growth is checkable from the heads alone rather than merely asserted. Verify a head by recomputing the full-log root from the warrantRegistry chain listing, or trust-on-inclusion via a warrantRegistry inclusion proof.';
 
 // Integrity metadata only — a TreeHead row carries no warrant content, but the
 // projection keeps the surface explicit and stable for external verifiers.
@@ -291,6 +293,244 @@ async function opCheckpoint(req, base44, svc, op) {
   }
 }
 
+// ——— op=consistency — RFC 6962 §2.1.2 consistency proofs between two
+// published tree heads. This closes the transparency chain's weakest link.
+//
+// An inclusion proof proves a warrant sits under SOME root. It says nothing
+// about whether that root was reached honestly: a log that rewrote history
+// between two checkpoints can still hand out perfectly valid inclusion proofs
+// against its new, forked root. prev_root links only record the CLAIM that
+// head N+1 follows head N. A consistency proof is what makes that claim
+// checkable — it proves every one of the first m leaves is byte-identical and
+// in the same order in the size-n tree, i.e. the log only ever appended.
+//
+// Public and read-only (transparency is the whole point). Like
+// checkpoint_create it pages the FULL warrant log and FAILS CLOSED on a
+// truncated scan: a consistency proof over a partial view of the log would be
+// a falsehood with a signature attached.
+const CONSISTENCY_HEAD_SCAN = 200;
+const CONSISTENCY_NOTE = [
+  'This response is self-contained: verify it OFFLINE with nothing from us but the published key document (warrantRegistry?op=keys, or any pinned copy of it).',
+  '(1) SIGNATURES — for each of from/to: canonicalize signing_payload per RFC 8785 (JCS), take lowercase SHA-256 hex of those bytes and check it equals payload_hash, then check signed_head (strip the "sf2x_ed25519_" prefix, base64url-decode) as an Ed25519 signature over the UTF-8 bytes of that hex string, using the public key whose key_id matches.',
+  '(2) CONSISTENCY — run the RFC 9162 §2.1.4.2 fold over proof[] with first=from.tree_size, first_hash=from.root, second=to.tree_size, second_hash=to.root. If from.tree_size is an exact power of two, prepend from.root to the node list first. Hashing is RFC 6962 §2.1: leaf = SHA-256(0x00 || leaf bytes), interior = SHA-256(0x01 || left || right).',
+  '(3) CONCLUSION — both signatures valid and the fold reproducing both roots proves the size-to tree is an APPEND of the size-from tree: the first from.tree_size leaves are unchanged and in the same order. It does NOT prove anything about leaves added after to.tree_size.',
+  'from.tree_size === to.tree_size is the degenerate case: proof is the empty array and the two heads must simply be the same root.',
+].join(' ');
+
+// The checkpoint_create full-log paging loop, reproduced for this op (the
+// ledgerIntegrityCheck $lte-cursor fail-closed pattern: newest-first pages
+// matching the platform sort, a seen-set for rows re-fetched across cursor
+// boundaries, a hard stop on any page the cursor cannot advance past).
+// opCheckpoint deliberately keeps its own inline copy so its live, admin-gated
+// behavior is byte-for-byte untouched by this addition — IF YOU CHANGE ONE,
+// CHANGE BOTH. `truncated` means the scan may not cover the whole log.
+async function scanFullWarrantLog(svc) {
+  const rows = [];
+  const seen = new Set();
+  let cursor = null;
+  let pagesScanned = 0;
+  let truncated = false;
+
+  while (true) {
+    const pageQuery = cursor ? { created_date: { $lte: cursor } } : {};
+    let page;
+    try {
+      page = await svc.entities.Warrant.filter(pageQuery, '-created_date', PAGE_SIZE);
+    } catch {
+      truncated = true;
+      break;
+    }
+    page = page || [];
+    if (!page.length) break;
+    pagesScanned++;
+
+    const fresh = page.filter((w) => w && !seen.has(w.id));
+    if (!fresh.length) {
+      if (page.length >= PAGE_SIZE) truncated = true;
+      break;
+    }
+    if (rows.length + fresh.length > MAX_LEAVES) {
+      truncated = true;
+      break;
+    }
+    for (const w of fresh) seen.add(w.id);
+    rows.push(...fresh);
+
+    if (page.length < PAGE_SIZE) break; // short page — the log is fully scanned
+    cursor = page[page.length - 1].created_date;
+    if (!cursor) { truncated = true; break; }
+  }
+
+  // The SAME deterministic leaf order + leaf rule as checkpoint_create and the
+  // default registry path: created_date ascending with id tie-break; leaf
+  // string = signed_hash (id when unsigned). Anything else would produce a
+  // proof against a tree nobody else can reproduce.
+  rows.sort((a, b) => {
+    const at = String(a.created_date || '');
+    const bt = String(b.created_date || '');
+    if (at !== bt) return at < bt ? -1 : 1;
+    return String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0;
+  });
+
+  return { leaves: rows.map((w) => w.signed_hash || w.id), pagesScanned, truncated };
+}
+
+// Everything an offline verifier needs for ONE head: the signed payload shape
+// itself, so there is no guessing about what was canonicalized.
+function headBlock(h) {
+  return {
+    tree_size: Number(h.tree_size),
+    root: h.merkle_root,
+    signed_head: h.signed_head,
+    key_id: h.key_id || null,
+    head_id: h.id,
+    created_date: h.created_date,
+    prev_root: h.prev_root ?? null,
+    schema_version: h.schema_version || TREEHEAD_SCHEMA,
+    payload_hash: h.payload_hash,
+    signing_payload: {
+      schema: h.schema_version || TREEHEAD_SCHEMA,
+      tree_size: Number(h.tree_size),
+      merkle_root: h.merkle_root,
+      prev_root: h.prev_root ?? null,
+    },
+  };
+}
+
+async function opConsistency(req, svc, body) {
+  try {
+    // Params ride in the POST body or the query string, so a plain GET works —
+    // the op-router rule (same idiom as op=eligibility).
+    const params = new URL(req.url).searchParams;
+    const pick = (k) => body[k] ?? params.get(k) ?? null;
+
+    // TreeHead reads are deny-by-default at the entity, so the published view
+    // goes through the service role — same as op=checkpoint.
+    const heads = ((await svc.entities.TreeHead.list('-created_date', CONSISTENCY_HEAD_SCAN).catch(() => [])) || [])
+      .sort(newestFirst)
+      .filter((h) => Number.isFinite(Number(h.tree_size)) && h.merkle_root);
+    const availableSizes = [...new Set(heads.map((h) => Number(h.tree_size)))].sort((a, b) => a - b);
+
+    // Default when no sizes are given: the two newest heads (the question
+    // people actually mean — "did the log stay append-only since last time?").
+    const rawFrom = pick('from_tree_size');
+    const rawTo = pick('to_tree_size');
+    let fromSize = rawFrom === null || rawFrom === '' ? null : Number(rawFrom);
+    let toSize = rawTo === null || rawTo === '' ? null : Number(rawTo);
+    if (fromSize === null && toSize === null) {
+      if (heads.length < 2) {
+        return Response.json({
+          error: 'Consistency needs two published tree heads; the log currently has fewer. Create a checkpoint (op=checkpoint_create, admin) or pass from_tree_size/to_tree_size explicitly.',
+          available_tree_sizes: availableSizes,
+          algorithm: MERKLE_ALGORITHM,
+        }, { status: 400 });
+      }
+      toSize = Number(heads[0].tree_size);
+      fromSize = Number(heads[1].tree_size);
+    }
+    if (!Number.isInteger(fromSize) || !Number.isInteger(toSize) || fromSize < 1 || toSize < 1) {
+      return Response.json({
+        error: 'from_tree_size and to_tree_size must be positive integers naming two published tree heads.',
+        available_tree_sizes: availableSizes,
+      }, { status: 400 });
+    }
+    if (fromSize > toSize) {
+      return Response.json({
+        error: 'from_tree_size must not exceed to_tree_size — a consistency proof runs forward, from the older tree to the newer one.',
+        available_tree_sizes: availableSizes,
+      }, { status: 400 });
+    }
+
+    // Resolve each head. A single tree_size carrying two DIFFERENT roots is not
+    // a lookup ambiguity to paper over — it is fork evidence, so say so.
+    const resolve = (size) => {
+      const matches = heads.filter((h) => Number(h.tree_size) === size);
+      const roots = [...new Set(matches.map((h) => h.merkle_root))];
+      return { head: matches[0] || null, conflictingRoots: roots.length > 1 ? roots : null };
+    };
+    const fromResolved = resolve(fromSize);
+    const toResolved = resolve(toSize);
+    for (const [label, r, size] of [['from', fromResolved, fromSize], ['to', toResolved, toSize]]) {
+      if (r.conflictingRoots) {
+        return Response.json({
+          error: `FORK EVIDENCE: two published heads at ${label}_tree_size ${size} carry different roots. Refusing to issue a consistency proof.`,
+          tree_size: size,
+          conflicting_roots: r.conflictingRoots,
+        }, { status: 409 });
+      }
+      if (!r.head) {
+        return Response.json({
+          error: `No published tree head at ${label}_tree_size ${size}.`,
+          available_tree_sizes: availableSizes,
+        }, { status: 404 });
+      }
+    }
+
+    // Page the ENTIRE warrant log and rebuild the leaves. Fails closed on a
+    // truncated scan exactly like checkpoint_create.
+    const { leaves, pagesScanned, truncated } = await scanFullWarrantLog(svc);
+    if (truncated) {
+      return Response.json({
+        error: 'Full-log scan did not complete — refusing to issue a consistency proof over a partial view of the warrant log.',
+        pages_scanned: pagesScanned,
+        rows_collected: leaves.length,
+      }, { status: 503 });
+    }
+    if (leaves.length < toSize) {
+      return Response.json({
+        error: 'The live log holds fewer leaves than the requested to_tree_size — the tree cannot be reconstructed to that size, so no proof can be issued.',
+        live_tree_size: leaves.length,
+        requested_to_tree_size: toSize,
+        pages_scanned: pagesScanned,
+      }, { status: 409 });
+    }
+
+    // Before proving anything, check that the live log actually REPRODUCES both
+    // published heads. If it does not, the honest answer is the mismatch — not
+    // a proof between two roots we just invented.
+    const recomputedFrom = await merkleRoot(leaves.slice(0, fromSize));
+    const recomputedTo = await merkleRoot(leaves.slice(0, toSize));
+    const mismatches = [];
+    if (recomputedFrom !== fromResolved.head.merkle_root) {
+      mismatches.push({ tree_size: fromSize, published_root: fromResolved.head.merkle_root, recomputed_root: recomputedFrom });
+    }
+    if (recomputedTo !== toResolved.head.merkle_root) {
+      mismatches.push({ tree_size: toSize, published_root: toResolved.head.merkle_root, recomputed_root: recomputedTo });
+    }
+    if (mismatches.length) {
+      return Response.json({
+        error: 'TAMPER EVIDENCE: the live warrant log does not reproduce a published tree head. Refusing to issue a consistency proof.',
+        mismatches,
+        live_tree_size: leaves.length,
+        pages_scanned: pagesScanned,
+      }, { status: 409 });
+    }
+
+    // consistencyProof returns null — never a fabricated path — for any range
+    // RFC 6962 does not define. Reaching that here would mean a guard above is
+    // wrong, so it is a 500, not a silent empty array.
+    const proof = await consistencyProof(leaves, fromSize, toSize);
+    if (proof === null) {
+      return Response.json({ error: 'Consistency proof could not be constructed for the requested range.' }, { status: 500 });
+    }
+
+    return Response.json({
+      registry: 'sf2x_warrants',
+      schema: TREEHEAD_SCHEMA,
+      from: headBlock(fromResolved.head),
+      to: headBlock(toResolved.head),
+      proof,
+      algorithm: MERKLE_ALGORITHM,
+      leaf_rule: 'Leaves are the FULL warrant log ordered by created_date ascending with id as tie-break; each leaf string is the warrant signed_hash (its id when unsigned), hashed as UTF-8 bytes.',
+      log: { live_tree_size: leaves.length, pages_scanned: pagesScanned },
+      verification_note: CONSISTENCY_NOTE,
+    });
+  } catch (error) {
+    console.error('warrantRegistry op=consistency error', error);
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+}
+
 // ——— op=eligibility — the §20 display-eligibility rail as a public op. A v2
 // warrant binds the EXACT answer text via answer_text_sha256; this op answers
 // "does the text being displayed still carry this warrant?" by hash comparison
@@ -375,6 +615,7 @@ export default async function (req) {
     const op = body.op || new URL(req.url).searchParams.get('op') || null;
     if (op === 'keys') return await opKeys();
     if (op === 'checkpoint' || op === 'checkpoint_create') return await opCheckpoint(req, base44, svc, op);
+    if (op === 'consistency') return await opConsistency(req, svc, body);
     if (op === 'eligibility') return await opEligibility(req, svc, body);
     if (op) return Response.json({ error: 'unknown op' }, { status: 400 });
 

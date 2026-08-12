@@ -585,10 +585,98 @@ Each head:
   `{ unchanged: true, head }` and creates nothing; heads are never updated or
   deleted, and a checkpoint over a partial log scan fails closed (503) instead
   of publishing.
-- **No consistency proofs yet** — v1 stores `prev_root` chain links but does
-  not produce RFC 6962 consistency proofs between heads, so append-only growth
-  between two heads cannot yet be proven from the heads alone. Flagged as a
-  follow-up; the response `note` says the same.
+- **Append-only growth is provable** — `prev_root` only records the *claim*
+  that one head follows another. `op=consistency` (below) issues the RFC 6962
+  proof that makes the claim checkable.
+
+### Consistency proofs (RFC 6962 §2.1.2)
+
+`GET|POST /api/functions/warrantRegistry?op=consistency` (or POST body
+`{"op": "consistency", "from_tree_size": 500, "to_tree_size": 1200}`) — public,
+no auth.
+
+**Why this matters.** An inclusion proof proves a warrant sits under *some*
+root. It says nothing about whether that root was reached honestly: a log that
+rewrote history between two checkpoints can still hand out perfectly valid
+inclusion proofs against its new, forked root. A consistency proof closes that
+hole — it proves the size-*n* tree is an **append** of the size-*m* tree, i.e.
+that all *m* earlier leaves are byte-identical and in the same order. Chain it
+across every published head and the log is *provably* append-only.
+
+Omit both sizes and the two newest heads are used. Response:
+
+```json
+{
+  "registry": "sf2x_warrants",
+  "schema": "aether.treehead.v1",
+  "from": {
+    "tree_size": 500,
+    "root": "<lowercase hex>",
+    "signed_head": "sf2x_ed25519_...",
+    "key_id": "ed25519:...",
+    "head_id": "<TreeHead id>",
+    "created_date": "<ISO timestamp>",
+    "prev_root": "<hex>|null",
+    "schema_version": "aether.treehead.v1",
+    "payload_hash": "<lowercase hex>",
+    "signing_payload": { "schema": "aether.treehead.v1", "tree_size": 500, "merkle_root": "<hex>", "prev_root": "<hex>|null" }
+  },
+  "to": { "…same shape at the later size…" },
+  "proof": ["<lowercase hex>", "…"],
+  "algorithm": "RFC6962-SHA256",
+  "leaf_rule": "…",
+  "log": { "live_tree_size": 1200, "pages_scanned": 3 },
+  "verification_note": "…"
+}
+```
+
+**Offline verification recipe.** The response is self-contained: everything
+needed is in it, plus the published key document (`?op=keys`, or any pinned
+copy). No further call to us.
+
+1. **Both signatures.** For each of `from` / `to`: canonicalize
+   `signing_payload` per RFC 8785 (JCS), take the lowercase SHA-256 hex of
+   those bytes, and check it equals `payload_hash`. Then strip the
+   `sf2x_ed25519_` prefix from `signed_head`, base64url-decode, and verify it
+   as an Ed25519 signature over the **UTF-8 bytes of that hex string**, using
+   the public key whose `key_id` matches.
+2. **The consistency fold** (RFC 9162 §2.1.4.2) with `first = from.tree_size`,
+   `first_hash = from.root`, `second = to.tree_size`, `second_hash = to.root`:
+   - If `first` is an exact power of two, **prepend `first_hash`** to the node
+     list (the generator omits it — `D[0:m]` is a complete subtree there).
+   - Set `fn = first - 1`, `sn = second - 1`; while `LSB(fn)` is set,
+     right-shift both equally.
+   - Set `fr` and `sr` to the first node. For each subsequent node `c`: if
+     `sn == 0`, fail. If `LSB(fn)` is set **or** `fn == sn`, set
+     `fr = H(0x01 ‖ c ‖ fr)` and `sr = H(0x01 ‖ c ‖ sr)`, then — if `LSB(fn)`
+     is not set — right-shift both until `LSB(fn)` is set or `fn == 0`.
+     Otherwise set `sr = H(0x01 ‖ sr ‖ c)`. Finally right-shift both once.
+   - Accept only if `fr == first_hash`, `sr == second_hash`, **and** `sn == 0`.
+   - Hashing is RFC 6962 §2.1: leaf = SHA-256(`0x00` ‖ leaf bytes), interior =
+     SHA-256(`0x01` ‖ left ‖ right).
+3. **Conclusion.** Two valid signatures plus a fold that reproduces both roots
+   proves the size-`to` tree is an append of the size-`from` tree. It proves
+   nothing about leaves added *after* `to.tree_size` — check the next head pair
+   for that.
+
+Scope and failure modes, stated plainly:
+
+- `from_tree_size === to_tree_size` is the degenerate case: `proof` is the
+  **empty array** and the two heads must simply carry the same root.
+- **Fail-closed, always.** A truncated full-log scan is `503` (a proof over a
+  partial view of the log would be a falsehood with a signature attached). A
+  live log that no longer reproduces a published head is `409` **tamper
+  evidence** — the mismatch is returned, never a proof between roots we
+  invented. Two published heads at the same `tree_size` with different roots is
+  `409` **fork evidence**. An unknown size is `404` with
+  `available_tree_sizes`. Nothing here ever fabricates a path.
+- Leaves and ordering are identical to the checkpoint rule above, so the whole
+  chain is reproducible from the public listing.
+- Conformance: `app/base44/shared/tests/merkle.consistency.test.mjs` is
+  exhaustive over every `(m, n)` pair for tree sizes 1–33 (561 proofs), with
+  roots cross-checked against a second, independently written MTH, and 11,553
+  tamper cases (byte flips, truncation, extension, forged roots, cross-pair
+  reuse) all rejected.
 
 ## Rate Limits
 

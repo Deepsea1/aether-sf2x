@@ -94,6 +94,60 @@ const DeveloperHub = lazy(() => import('@/pages/DeveloperHub'));
 const PortalHub = lazy(() => import('@/pages/PortalHub'));
 const Showcase = lazy(() => import('@/pages/Showcase'));
 import ProtectedRoute from '@/components/ProtectedRoute';
+import HonestEmpty from '@/components/aether/HonestEmpty';
+
+// ── Public cosmos experience ────────────────────────────────────────────────────────
+// The 3D evidence lens (/cosmos), the proof theater (/proof) and the live tribunal feed
+// (/live). All three sit OUTSIDE ProtectedRoute on purpose: the proof is the pitch, so a
+// stranger with a link has to be able to watch it work. /warrant-proof is untouched.
+//
+// These three pages are authored by sibling missions in this phase, so they may not be on
+// disk yet. A bare `import('@/pages/Cosmos')` would hard-fail the whole build until the
+// moment they land, so they resolve through a Vite glob instead: the glob compiles to an
+// empty map when a file is absent (no build error) and picks up the real page the instant
+// it appears — no second edit to this file, which matters because routing has a single
+// owner this phase. Each route still gets its own lazy() chunk, exactly like every other
+// route above.
+const cosmosPages = import.meta.glob('/src/pages/{Cosmos,ProofTheater,LiveTribunal}.jsx');
+
+// The fallback is an honest empty state, never a blank screen and never a mock that could
+// be mistaken for the real experience — it says what is missing and where to go instead.
+function RouteNotBuilt({ title, reason }) {
+  return (
+    <div className="min-h-screen bg-[#070A0F] px-6 py-24">
+      <div className="mx-auto max-w-xl">
+        <HonestEmpty
+          title={title}
+          reason={reason}
+          state="unknown"
+          action={{ label: 'Back to Aether', to: '/' }}
+        />
+      </div>
+    </div>
+  );
+}
+
+const lazyCosmosPage = (name, title, reason) => lazy(async () => {
+  const entry = Object.entries(cosmosPages).find(([path]) => path.endsWith(`/${name}.jsx`));
+  if (entry) return entry[1]();
+  return { default: () => <RouteNotBuilt title={title} reason={reason} /> };
+});
+
+const Cosmos = lazyCosmosPage(
+  'Cosmos',
+  'The cosmos view has not shipped yet',
+  'This route is reserved for the 3D evidence lens. It is not rendering an empty universe — the page itself is still being built, so there is nothing here to mistake for a real one.',
+);
+const ProofTheater = lazyCosmosPage(
+  'ProofTheater',
+  'The proof theater has not shipped yet',
+  'This route is reserved for the step-by-step warrant walkthrough. Until it lands, the signed proof for any warrant is already viewable on the warrant proof page.',
+);
+const LiveTribunal = lazyCosmosPage(
+  'LiveTribunal',
+  'The live tribunal has not shipped yet',
+  'This route is reserved for the streaming verification feed. Nothing is being hidden — the page has simply not been built, so no feed is claimed to exist.',
+);
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -194,6 +248,9 @@ const AuthenticatedApp = () => {
       <Route path="/monthly-report" element={<MonthlyReport />} />
       <Route path="/warrant-verifier" element={<WarrantVerifier />} />
       <Route path="/warrant-proof" element={<WarrantProof />} />
+      <Route path="/cosmos" element={<Cosmos />} />
+      <Route path="/proof" element={<ProofTheater />} />
+      <Route path="/live" element={<LiveTribunal />} />
       <Route path="/public/claims" element={<PublicClaims />} />
       <Route path="/fast-path" element={<FastPath />} />
       <Route path="/pitch" element={<PitchDeck />} />

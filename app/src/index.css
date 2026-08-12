@@ -147,3 +147,85 @@
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+
+/* ────────────────────────────────────────────────────────────────────────────
+   AETHER DESIGN TOKENS — mirrors src/lib/design/tokens.js.
+   JS owns the canonical values; these variables exist so CSS, tailwind.config.js
+   and inline gradients can reach the same colours without a second opinion.
+   Every state colour below is measured ≥ 4.5:1 (WCAG AA) on --aether-surface.
+   ──────────────────────────────────────────────────────────────────────────── */
+:root {
+  --aether-void: #070A0F;          /* page */
+  --aether-surface: #0B0F16;       /* card */
+  --aether-raised: #111827;        /* elevated */
+  --aether-inset: #080B11;         /* well */
+  --aether-line: rgba(255, 255, 255, 0.10);
+  --aether-line-strong: rgba(255, 255, 255, 0.16);
+
+  --aether-text: #E8EEF7;          /* 16.45:1 */
+  --aether-text-dim: #94A3B8;      /*  7.49:1 */
+  --aether-text-muted: #78879E;    /*  5.26:1 */
+
+  --aether-focus: #7DD3FC;         /* 11.51:1 — interaction only, never a state */
+  --aether-focus-halo: rgba(125, 211, 252, 0.22);
+
+  --state-supported: #6EE7B7;      /* 12.59:1 */
+  --state-qualified: #67E8F9;      /* 13.24:1 */
+  --state-contested: #FBBF24;      /* 11.50:1 */
+  --state-unsupported: #FB7185;    /*  7.13:1 */
+  --state-unknown: #9FB0C6;        /*  8.68:1 */
+  --state-hypothesis: #C4B5FD;     /* 10.40:1 */
+  --state-stale: #C9B08A;          /*  9.19:1 */
+  --state-revoked: #C4707E;        /*  5.45:1 */
+  --state-blocked: #8A8FB5;        /*  6.10:1 */
+}
+
+/* Keyboard focus you cannot miss — a hard outline plus a soft halo, composed on top of
+   any Tailwind ring a component already sets rather than replacing it. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible,
+[role="link"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--aether-focus);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 0 4px var(--aether-focus-halo),
+    var(--tw-ring-offset-shadow, 0 0 #0000),
+    var(--tw-ring-shadow, 0 0 #0000),
+    var(--tw-shadow, 0 0 #0000);
+}
+
+::selection {
+  background-color: rgba(103, 232, 249, 0.30);
+  color: #EAF2FF;
+}
+
+/* Reduced motion: movement is removed, information never is. Anything that animates in
+   must be left at its final, fully-visible value. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-aether-scan,
+  .animate-aether-pulse,
+  .animate-aether-drift {
+    animation: none !important;
+  }
+
+  [data-motion="enter"] {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
