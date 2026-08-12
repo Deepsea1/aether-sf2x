@@ -124,3 +124,95 @@ export async function verifyWarrantV2(payload, signedHashV2) {
     return false;
   }
 }
+
+// ——— The PUBLIC seal ————————————————————————————————————————————————————————
+//
+// The v2 seal signs CONTENT — conclusion, premises, sources — and the warrant
+// registry deliberately never publishes any of it (the P1 privacy boundary:
+// the chain makes every warrant enumerable, so content there would make every
+// customer inquiry readable without auth). The consequence is that a stranger
+// holding a registry response CANNOT reconstruct the v2 signed bytes and so
+// cannot check a warrant's own seal. That gap is real and has been stated
+// honestly rather than papered over.
+//
+// The public seal closes it without moving the boundary: an ADDITIONAL Ed25519
+// signature over a payload made entirely of PUBLISHED material — ids, hashes,
+// and the row's created_date. Every field of it appears in the registry
+// response, so a verifier rebuilds the payload from that response alone,
+// canonicalizes it (RFC 8785), hashes it, and checks the signature with the key
+// from ?op=keys — fully offline, nothing from us but the key document. Content
+// stays private; only hashes travel.
+//
+// Usage (writers), AFTER the Warrant row exists (warrant_id + created_date are
+// part of what is signed):
+//   const pub = await buildPublicWarrantPayload({ warrant_id, answer_version_id,
+//     answer_text_sha256, conclusion, premises, sources, created_date });
+//   const sealed = await signPublicWarrant(pub);
+//   if (sealed) store { conclusion_sha256, premises_sha256, sources_sha256 } from
+//   `pub` plus { public_payload_hash, public_seal, public_seal_key_id } from `sealed`.
+export const WARRANT_PUBLIC_SCHEMA_V1 = 'aether.warrant.public.v1';
+
+// Build the public payload — EXACTLY these keys plus the schema tag. The three
+// content fields are hashed here, never carried: conclusion as the string
+// persisted on the row, premises/sources as the RFC 8785 canonicalization of
+// the arrays persisted on the row (canonical, so the hash is independent of any
+// serializer's whims). The four identifier fields are required to be non-empty
+// strings and throw otherwise — a payload with a missing id or timestamp cannot
+// be rebuilt by a verifier, so it must never be signed. Callers wrap, so a
+// throw means "this warrant carries no public seal", which is an honest state.
+export async function buildPublicWarrantPayload({ warrant_id, answer_version_id, answer_text_sha256, conclusion, premises, sources, created_date }) {
+  const required = { warrant_id, answer_version_id, answer_text_sha256, created_date };
+  for (const [name, value] of Object.entries(required)) {
+    if (typeof value !== 'string' || !value) {
+      throw new Error(`buildPublicWarrantPayload: ${name} must be a non-empty string`);
+    }
+  }
+  return {
+    schema: WARRANT_PUBLIC_SCHEMA_V1,
+    warrant_id,
+    answer_version_id,
+    answer_text_sha256,
+    conclusion_sha256: await sha256Hex(String(conclusion ?? '')),
+    premises_sha256: await sha256Hex(jcsCanonicalize(Array.isArray(premises) ? premises : [])),
+    sources_sha256: await sha256Hex(jcsCanonicalize(Array.isArray(sources) ? sources : [])),
+    created_date,
+  };
+}
+
+// Sign the public payload with the same mechanics as signWarrantV2:
+// public_payload_hash = SHA-256 of the RFC 8785 canonical JSON; public_seal =
+// Ed25519 over the UTF-8 bytes of that hex STRING, encoded 'sf2x_ed25519_' +
+// base64url. Returns null when the Ed25519 keys are absent, and null rather
+// than an HMAC/fingerprint fallback if generateSignature degrades — an
+// unsigned artifact stored as a "public seal" would be a false claim, and the
+// whole point of this seal is that it is checkable by someone who does not
+// trust us.
+export async function signPublicWarrant(payload) {
+  const keys = await getKeys();
+  if (!keys.ed25519PrivateKey || !keys.ed25519PublicKey) return null;
+  const publicPayloadHash = await sha256Hex(jcsCanonicalize(payload));
+  const seal = await generateSignature(publicPayloadHash, { ed25519PrivateKey: keys.ed25519PrivateKey });
+  if (!String(seal).startsWith('sf2x_ed25519_')) return null;
+  return {
+    schema: WARRANT_PUBLIC_SCHEMA_V1,
+    public_payload_hash: publicPayloadHash,
+    public_seal: seal,
+    public_seal_key_id: await publicKeyId(),
+  };
+}
+
+// Verify a public seal with the PUBLIC key only — the mirror of
+// verifyWarrantV2, and the check any third party performs with the published
+// key document. Fails closed on a missing key, a non-Ed25519 artifact, or a
+// canonicalization error.
+export async function verifyPublicWarrant(payload, seal) {
+  try {
+    if (!String(seal || '').startsWith('sf2x_ed25519_')) return false;
+    const keys = await getKeys();
+    if (!keys.ed25519PublicKey) return false;
+    const publicPayloadHash = await sha256Hex(jcsCanonicalize(payload));
+    return await verifySignature(publicPayloadHash, seal, { ed25519PublicKey: keys.ed25519PublicKey });
+  } catch {
+    return false;
+  }
+}

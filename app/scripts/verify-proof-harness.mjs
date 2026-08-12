@@ -10,14 +10,23 @@
 //   4. Tamper detection: flipped sibling, wrong index, wrong leaf, short path,
 //      swapped left/right, second-preimage (a node replayed as a leaf).
 //   5. Ed25519 round-trip with a locally generated key, plus negative cases.
+//   6. The PUBLIC warrant seal: payload rebuild determinism, hash agreement,
+//      signature round-trip with a locally generated key, and per-field tamper
+//      detection — plus the honest non-verdicts (unsealed, no key, no hash).
 
 import { webcrypto } from 'node:crypto';
 import {
   sha256Hex, leafHash, nodeHash, foldInclusionProof, verifyInclusion,
   jcsCanonicalize, canonicalPayloadHash, verifyEd25519, ed25519Supported,
   toHex, fromHex, treeHeadPayload, keysDocumentPayload, verifySealedDocument,
+  publicWarrantPayload, missingPublicWarrantFields, verifyPublicSeal,
+  PUBLIC_WARRANT_FIELDS,
 } from '../src/lib/proof/verify.js';
 import { merkleRoot, inclusionProof, verifyInclusion as sharedVerify } from '../base44/shared/merkle.js';
+// The SHIPPING server-side canonicalizer + signature encoder, for the
+// cross-implementation check in section 6.
+import { jcsCanonicalize as serverJcs, sha256Hex as serverSha256Hex } from '../base44/shared/canonicalSign.js';
+import { generateSignature as serverSign } from '../base44/shared/sf2xCore.js';
 
 if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
@@ -203,6 +212,138 @@ function eq(name, actual, expected) {
 
   const noKey = await verifySealedDocument({ payload, publishedHash: hash, signature: artifact, publicKeyPem: null });
   check('verifySealedDocument reports a missing key', !noKey.ok && noKey.failedStep === 'key');
+}
+
+// ————————————————————————————————— 6. The public warrant seal
+{
+  const pemFor = async (publicKey) => {
+    const spki = new Uint8Array(await webcrypto.subtle.exportKey('spki', publicKey));
+    return `-----BEGIN PUBLIC KEY-----\n${Buffer.from(spki).toString('base64').match(/.{1,64}/g).join('\n')}\n-----END PUBLIC KEY-----`;
+  };
+  const pair = await webcrypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+  const impostor = await webcrypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+  const pem = await pemFor(pair.publicKey);
+  const impostorPem = await pemFor(impostor.publicKey);
+  // The server convention: sign the UTF-8 bytes of the payload-hash HEX STRING.
+  const seal = async (hashHex, priv = pair.privateKey) => 'sf2x_ed25519_'
+    + Buffer.from(new Uint8Array(await webcrypto.subtle.sign({ name: 'Ed25519' }, priv, new TextEncoder().encode(hashHex)))).toString('base64url');
+
+  // A registry response carrying exactly the published material the contract names.
+  const published = {
+    warrant_id: '6a6de04b26cf84c8aa37847f',
+    answer_version_id: 'av_9f2c4d18e7b04a6c',
+    answer_text_sha256: await sha256Hex('the answer text, as persisted'),
+    conclusion_sha256: await sha256Hex('the conclusion, as persisted'),
+    premises_sha256: await sha256Hex(jcsCanonicalize(['premise one', 'premise two'])),
+    sources_sha256: await sha256Hex(jcsCanonicalize(['https://example.org/a', 'https://example.org/b'])),
+    created_date: '2026-08-12T10:45:00.000Z',
+  };
+  const payload = publicWarrantPayload(published);
+  const canonical = jcsCanonicalize(payload);
+  const hash = await sha256Hex(canonical);
+
+  eq('public payload carries exactly 8 keys', Object.keys(payload).length, 8);
+  eq('public payload schema is pinned, not adopted', payload.schema, 'aether.warrant.public.v1');
+  check('public payload canonical is key-sorted', canonical.startsWith('{"answer_text_sha256":'));
+  check('no content field leaks into the payload', !/conclusion":|premises":|sources":/.test(canonical));
+
+  // Determinism: input key order and unrelated published fields must not move a byte.
+  const shuffled = { signature_valid: true, validity_status: 'valid' };
+  for (const k of Object.keys(published).reverse()) shuffled[k] = published[k];
+  eq('rebuild is key-order and noise independent', jcsCanonicalize(publicWarrantPayload(shuffled)), canonical);
+  eq('rebuild is stable across calls', jcsCanonicalize(publicWarrantPayload(published)), canonical);
+
+  // A hole in the record fails closed — never a '' hashed in the missing field's place.
+  for (const field of PUBLIC_WARRANT_FIELDS) {
+    const holed = { ...published };
+    delete holed[field];
+    check(`missing ${field} → no payload`, publicWarrantPayload(holed) === null);
+    check(`missing ${field} is named back`, missingPublicWarrantFields(holed).includes(field));
+  }
+  check('a null field is missing, not empty', publicWarrantPayload({ ...published, created_date: null }) === null);
+
+  const record = {
+    ...published,
+    publicly_sealed: true,
+    public_payload_hash: hash,
+    public_seal: await seal(hash),
+    public_seal_key_id: 'ed25519:0123456789abcdef',
+  };
+
+  const ok = await verifyPublicSeal(record, pem);
+  check('public seal verifies from published material alone', ok.valid && ok.supported, ok.reason || '');
+  eq('the reported hash is the one computed here', ok.payload_hash, hash);
+  check('published hash agreed with the local one', ok.hashMatches === true);
+  eq('the key id is surfaced for comparison', ok.keyId, 'ed25519:0123456789abcdef');
+  check('uppercase published hash normalizes', (await verifyPublicSeal({ ...record, public_payload_hash: hash.toUpperCase() }, pem)).valid);
+
+  // TAMPER, FIELD BY FIELD. Each signed field is mutated in turn; the seal must
+  // break every time — caught at the hash step while the (now stale) published
+  // hash is present, and at the signature step once it is removed.
+  const survived = [];
+  for (const field of PUBLIC_WARRANT_FIELDS) {
+    const mutated = field === 'created_date' ? '2026-08-12T10:45:00.001Z' : `${record[field]}0`;
+    const withHash = await verifyPublicSeal({ ...record, [field]: mutated }, pem);
+    const withoutHash = await verifyPublicSeal({ ...record, [field]: mutated, public_payload_hash: null }, pem);
+    if (withHash.valid || withoutHash.valid) survived.push(field);
+    if (withHash.failedStep !== 'hash') survived.push(`${field}: hash step reported ${withHash.failedStep}`);
+    if (withoutHash.failedStep !== 'signature') survived.push(`${field}: signature step reported ${withoutHash.failedStep}`);
+  }
+  check('every signed field is tamper-evident', survived.length === 0, survived.join(' · '));
+
+  // The honest non-verdicts. None of these is a failed check, and none may read as one.
+  const unsealed = await verifyPublicSeal(published, pem);
+  check('an unsealed warrant reports absence', !unsealed.valid && unsealed.sealed === false && unsealed.failedStep === 'unsealed');
+  check('absence is worded as pre-dating, not failing', /pre-dates/i.test(unsealed.reason || ''));
+
+  const noArtifact = await verifyPublicSeal({ ...published, publicly_sealed: true }, pem);
+  check('sealed-but-no-artifact is reported as the contradiction it is', !noArtifact.valid && noArtifact.failedStep === 'seal');
+
+  const noKey = await verifyPublicSeal(record, null);
+  check('a missing public key stops the check, not the page', !noKey.valid && noKey.failedStep === 'key');
+
+  const noPublishedHash = await verifyPublicSeal({ ...record, public_payload_hash: null }, pem);
+  check('no published hash still verifies against the local one', noPublishedHash.valid && noPublishedHash.hashMatches === null);
+
+  const staleHash = await verifyPublicSeal({ ...record, public_payload_hash: 'ab'.repeat(32) }, pem);
+  check('a published hash that disagrees fails closed', !staleHash.valid && staleHash.failedStep === 'hash');
+
+  const wrongKey = await verifyPublicSeal(record, impostorPem);
+  check('a seal checked under another key is rejected', !wrongKey.valid && wrongKey.failedStep === 'signature');
+
+  const forged = await verifyPublicSeal({ ...record, public_seal: await seal(hash, impostor.privateKey) }, pem);
+  check('a seal made by another key is rejected', !forged.valid && forged.failedStep === 'signature');
+
+  const legacyArtifact = await verifyPublicSeal({ ...record, public_seal: 'sf2x_a1b2c3d4' }, pem);
+  check('a non-Ed25519 artifact is rejected, with its scheme named', !legacyArtifact.valid && /legacy/i.test(legacyArtifact.reason || ''));
+
+  const futureSchema = await verifyPublicSeal({ ...record, public_schema: 'aether.warrant.public.v2' }, pem);
+  check('an unknown schema stops the rebuild instead of guessing', !futureSchema.valid && futureSchema.failedStep === 'schema');
+
+  const holedRecord = { ...record };
+  delete holedRecord.sources_sha256;
+  const holedResult = await verifyPublicSeal(holedRecord, pem);
+  check('a hole in the record names the field', !holedResult.valid && holedResult.failedStep === 'payload' && /sources_sha256/.test(holedResult.reason || ''));
+
+  check('a non-object record is refused', !(await verifyPublicSeal(null, pem)).valid);
+
+  // CROSS-IMPLEMENTATION. Seal the same payload with the SHIPPING backend code —
+  // shared/canonicalSign.js's canonicalizer and hash, shared/sf2xCore.js's
+  // artifact encoding — and verify it with the browser module. This is what
+  // proves the two implementations agree; everything above only proves the
+  // browser module agrees with itself.
+  const pkcs8 = new Uint8Array(await webcrypto.subtle.exportKey('pkcs8', pair.privateKey));
+  const privPem = `-----BEGIN PRIVATE KEY-----\n${Buffer.from(pkcs8).toString('base64').match(/.{1,64}/g).join('\n')}\n-----END PRIVATE KEY-----`;
+  eq('server canonicalizer agrees byte for byte', serverJcs(payload), canonical);
+  eq('server hash agrees', await serverSha256Hex(canonical), hash);
+  const serverSealed = {
+    ...record,
+    public_payload_hash: await serverSha256Hex(serverJcs(payload)),
+    public_seal: await serverSign(hash, { ed25519PrivateKey: privPem }),
+  };
+  check('server-produced artifact carries the Ed25519 prefix', String(serverSealed.public_seal).startsWith('sf2x_ed25519_'));
+  const serverChecked = await verifyPublicSeal(serverSealed, pem);
+  check('a seal made by the shipping backend crypto verifies here', serverChecked.valid, serverChecked.reason || '');
 }
 
 // ————————————————————————————————— report

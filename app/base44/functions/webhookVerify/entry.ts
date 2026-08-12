@@ -3,7 +3,7 @@ import { resolveApiKey, checkQuota, recordUsage, CREDIT_COSTS } from '../../shar
 import { callLLMJson } from '../../shared/llmRouter.js';
 import { validateWebhookUrl, guardedPost } from '../../shared/webhooks.js';
 import { PIPELINE_VERSION, textReuseKey, lookupVerdict, recordHit } from '../../shared/verdictReuse.js';
-import { buildWarrantV2Payload, signWarrantV2, sha256Hex } from '../../shared/canonicalSign.js';
+import { buildWarrantV2Payload, signWarrantV2, sha256Hex, buildPublicWarrantPayload, signPublicWarrant } from '../../shared/canonicalSign.js';
 import { getActiveMode } from '../../shared/serviceMode.js';
 import { normalizeClaims, premisesFrom } from '../../shared/claimShape.js';
 
@@ -272,6 +272,15 @@ Respond as a single JSON object.`;
     // persisted on the warrant. Applied via .update, wrapped so a signing
     // failure never fails the request (the warrant just stays v2-unsigned,
     // like a pre-rollout one).
+    //
+    // PUBLIC SEAL: the v2 payload above binds CONTENT the warrant registry
+    // deliberately never publishes, so an outsider cannot rebuild its signed
+    // bytes and cannot check it. The additional public seal signs a payload of
+    // published material only — ids, hashes of that same persisted content, and
+    // the row's created_date — so it IS checkable offline against
+    // warrantRegistry?op=keys. Built in its own guard inside this block: a
+    // public-seal failure must not cost the v2 seal that is otherwise ready to
+    // store, and neither may fail the verification.
     try {
       const answerTextSha256 = await sha256Hex(text.slice(0, 4000));
       const v2 = await signWarrantV2(buildWarrantV2Payload({
@@ -281,11 +290,35 @@ Respond as a single JSON object.`;
         premises,
         sources: [],
       }));
-      if (v2) {
-        await svc.entities.Warrant.update(warrant.id, {
-          schema_version: v2.schema_version, payload_hash_v2: v2.payload_hash_v2, signed_hash_v2: v2.signed_hash_v2, key_id_v2: v2.key_id, answer_text_sha256: answerTextSha256,
+      let pub = null;
+      let sealed = null;
+      try {
+        // created_date is signed and must be the value the registry publishes.
+        // create() carries it; re-read if it ever does not, rather than let
+        // every warrant fail to seal silently.
+        const row = warrant.created_date ? warrant : (await svc.entities.Warrant.get(warrant.id).catch(() => null)) || warrant;
+        pub = await buildPublicWarrantPayload({
+          warrant_id: warrant.id,
+          answer_version_id: av.id,
+          answer_text_sha256: answerTextSha256,
+          conclusion,
+          premises,
+          sources: [],
+          created_date: row.created_date,
         });
-      }
+        sealed = await signPublicWarrant(pub);
+      } catch (e) { console.error('warrant public seal failed', e?.message || e); }
+      const patch = {
+        ...(v2 ? { schema_version: v2.schema_version, payload_hash_v2: v2.payload_hash_v2, signed_hash_v2: v2.signed_hash_v2, key_id_v2: v2.key_id, answer_text_sha256: answerTextSha256 } : {}),
+        // answer_text_sha256 rides with the seal too, so a public seal can never
+        // reference a hash the row does not publish.
+        ...(sealed ? {
+          answer_text_sha256: answerTextSha256,
+          conclusion_sha256: pub.conclusion_sha256, premises_sha256: pub.premises_sha256, sources_sha256: pub.sources_sha256,
+          public_payload_hash: sealed.public_payload_hash, public_seal: sealed.public_seal, public_seal_key_id: sealed.public_seal_key_id,
+        } : {}),
+      };
+      if (Object.keys(patch).length) await svc.entities.Warrant.update(warrant.id, patch);
     } catch (e) { console.error('warrant v2 signing failed', e?.message || e); }
 
     // Metered here: the tribunal run is the billable work (same unit cost as

@@ -20,7 +20,7 @@ import MerkleFold from '@/components/proof/MerkleFold';
 import HashChip from '@/components/proof/HashChip';
 import {
   verifyInclusion, verifySealedDocument, keysDocumentPayload, treeHeadPayload,
-  canonicalPayloadHash, ed25519Supported, SCHEMA,
+  canonicalPayloadHash, verifyPublicSeal, ed25519Supported, SCHEMA,
 } from '@/lib/proof/verify';
 
 // THE PROOF THEATER — cryptography you watch your own browser perform.
@@ -31,14 +31,20 @@ import {
 // root. The server's opinion is displayed next to ours and is never substituted
 // for it.
 //
-// The hard honesty, stated on the page and not just here: a warrant's OWN seal
+// The hard honesty, stated on the page and not just here: a warrant's V2 seal
 // cannot be recomputed by a stranger, because the payload it commits to
 // (conclusion, premises, sources) is access-controlled — the registry publishes
-// integrity metadata only. What a stranger CAN do in their browser, with the
-// same key and the same signing convention, is verify the key document and the
-// signed tree head, and fold the inclusion proof. A content owner can paste
-// their canonical payload into stage 2 and re-derive payload_hash_v2 locally.
-// Anything beyond that is a claim about the server, and is labelled as one.
+// integrity metadata only. A content owner can paste their canonical payload
+// into stage 2 and re-derive payload_hash_v2 locally.
+//
+// The PUBLIC seal (public_seal) closes that gap without moving the privacy
+// boundary: it signs a payload made only of published material — the ids, the
+// created_date, and SHA-256 hashes of the answer text, conclusion, premises and
+// sources. Every field of it comes back in the registry response, so stage 2
+// rebuilds the exact signed bytes, hashes them here, and checks the Ed25519
+// signature with the key from ?op=keys. Content stays private; only digests
+// travel. Warrants issued before the seal existed carry none, and stage 2 says
+// exactly that rather than implying they failed a check that never ran.
 
 const REGISTRY_LIMIT = 500;
 const STAGE_MS = 5200;
@@ -106,6 +112,118 @@ function CanonicalBlock({ canonical, hash, hashLabel, publishedHash, matches }) 
   );
 }
 
+// Which of the four cases a loaded warrant is in, said out loud. The axes are
+// independent: a warrant's OWN seal is either publicly rebuildable (Ed25519 v2,
+// but only by whoever holds the content) or server-attested only (legacy HMAC /
+// fingerprint) — and separately it either carries the newer public seal or
+// pre-dates it. "Pre-dates it" is an absence and must never read as a failure.
+function boundaryNote(warrant, publiclySealed) {
+  if (publiclySealed) {
+    return warrant.publicly_verifiable
+      ? {
+        title: 'Two seals, and one of them is yours to check.',
+        body: 'The v2 seal above signs the warrant\'s conclusion, premises and sources themselves — access-controlled content a stranger cannot rebuild, so that "valid" stays the server\'s reconstruction, not yours. This warrant also carries a PUBLIC seal over the published hashes of that same content, and your browser verifies that one for itself, below.',
+      }
+      : {
+        title: 'A legacy seal, but a public one alongside it.',
+        body: 'This warrant\'s own seal is legacy (HMAC or a content fingerprint) and verifies server-side only — publishing an HMAC key would make it forgeable. It does carry the newer PUBLIC seal over the published hashes, and that one your browser verifies for itself, below.',
+      };
+  }
+  return warrant.publicly_verifiable
+    ? {
+      title: 'What your browser cannot do here, and why.',
+      body: 'This seal is Ed25519 and the key is published — but the bytes it signs are derived from the warrant\'s conclusion, premises and sources, and that content is access-controlled. A stranger cannot rebuild the signed message, so the "valid" above is the server\'s reconstruction of it, not yours. This warrant also pre-dates the public seal, so there is no second, publicly-rebuildable seal to check either — an absence, not a failure. What you can check yourself is directly below.',
+    }
+    : {
+      title: 'What your browser cannot do here, and why.',
+      body: 'This warrant carries a legacy seal (HMAC or a content fingerprint). Those verify server-side only: publishing an HMAC key would make the seal forgeable by anyone who read it. It also pre-dates the public seal, so there is no publicly-rebuildable seal on it either — an absence, not a failed check. Treat this as the server attesting, not as public proof.',
+    };
+}
+
+// The public seal, checked here. Everything this panel shows is derived in the
+// browser: the payload is rebuilt from the registry's own published hashes, the
+// SHA-256 is computed locally, and the Ed25519 check runs against the key from
+// ?op=keys. The server's verdict is not consulted and is not displayed as one.
+function PublicSealPanel({ seal, artifact, publishedHash, activeKey }) {
+  const pending = !seal;
+  const state = pending ? 'unknown' : seal.valid ? 'supported' : seal.supported === false ? 'blocked' : 'unsupported';
+  const label = pending
+    ? 'Checking in this browser…'
+    : seal.valid
+      ? 'Public seal verified in your browser'
+      : seal.supported === false
+        ? 'This browser cannot run the check'
+        : `Failed at: ${seal.failedStep}`;
+  // The seal names the key that made it. If that is not the key we just fetched,
+  // a "valid" here would be valid under the wrong key — say so rather than pass.
+  const keyMismatch = !!seal?.keyId && !!activeKey && seal.keyId !== activeKey;
+
+  return (
+    <div className="mt-4 border-t border-white/10 pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Label>The public seal — rebuilt and checked here</Label>
+        <EpistemicBadge state={state} label={label} />
+      </div>
+
+      <p className="mt-2 text-[12px] leading-relaxed text-slate-400">
+        This seal signs a payload of <strong className="font-medium text-slate-300">hashes, never content</strong>: the
+        warrant and answer-version ids, the issue date, and the SHA-256 of the answer text, the conclusion, the premises
+        list and the sources list. Every one of those fields is published, so your browser can rebuild the exact bytes
+        that were signed — which is precisely what the v2 seal above cannot offer a stranger.
+      </p>
+
+      <div className="mt-3">
+        <CanonicalBlock
+          canonical={seal?.canonical}
+          hash={seal?.payload_hash}
+          hashLabel="SHA-256 of the payload your browser rebuilt"
+          publishedHash={publishedHash}
+          matches={seal ? seal.hashMatches : null}
+        />
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <HashChip label="Public seal artifact (Ed25519)" value={artifact} tone="theirs" />
+        <div className="rounded-lg border border-white/10 bg-white/[0.02] p-2.5">
+          <Label>Ed25519 verify</Label>
+          <p className="mt-1.5 text-[11.5px] leading-relaxed text-slate-400">
+            {pending
+              ? 'Not run yet.'
+              : seal.valid
+                ? 'Valid. Your browser rebuilt the payload from the published hashes, hashed it, and checked the signature against the key document. No server was asked, and no warrant content was needed.'
+                : seal.reason}
+          </p>
+          <div className="mt-2 text-[11px] text-slate-500">
+            signed by <span className="font-mono">{seal?.keyId || 'no key id published'}</span>
+          </div>
+        </div>
+      </div>
+
+      {seal?.hashMatches === null && seal?.payload_hash ? (
+        <p className="mt-3 text-[11.5px] leading-relaxed text-slate-500">
+          The registry published no <span className="font-mono text-[11px]">public_payload_hash</span> to cross-check
+          against. That does not weaken the result above: the signature was checked over the hash this browser computed,
+          which is the stronger of the two inputs — there is simply one fewer agreement to show you.
+        </p>
+      ) : null}
+
+      {keyMismatch ? (
+        <p className="mt-3 text-[11.5px] leading-relaxed text-[#FB7185]">
+          Key mismatch: the seal names <span className="font-mono">{seal.keyId}</span> but the published key document
+          serves <span className="font-mono">{activeKey}</span>. The check above ran against the served key, so treat it
+          as unresolved until the two agree.
+        </p>
+      ) : null}
+
+      <p className="mt-3 text-[11.5px] leading-relaxed text-slate-500">
+        What this does <em>not</em> give you: the content itself. A verified public seal proves the hashes the registry
+        publishes are the ones Aether signed, and that none of them has been altered since. It cannot tell you what text
+        produced them — only the holder of that text can check a hash against it, on the panel above.
+      </p>
+    </div>
+  );
+}
+
 function SelfVerify({ title, code }) {
   return (
     <details className="group mt-4 rounded-xl border border-white/10 bg-[#080B11]">
@@ -124,16 +242,24 @@ function SelfVerify({ title, code }) {
 
 // Stage state → a token key. `unknown` is the honest default everywhere: a stage
 // that has not run is "not yet measured", never a hopeful pass and never a zero.
-function sealState(keys, warrant, browserEd) {
+function sealState(keys, warrant, browserEd, publicSeal) {
   if (browserEd === false) return 'blocked';
   if (!keys) return 'unknown';
   if (!keys.ok) return 'unsupported';
   if (!warrant) return 'supported';
   if (warrant.signature_valid === false) return 'unsupported';
-  // Deliberately never 'supported' with a warrant loaded: the key document
-  // verified in this browser, but the warrant's own signed message is derived
-  // from access-controlled content, so its "valid" is the server's — a real
-  // qualification, not a hedge. Stage 2 spells out the difference.
+  // A public seal is the one case where this stage can be fully earned: the
+  // browser rebuilt the signed payload from published hashes and checked the
+  // signature itself, so the verdict is ours, not the server's.
+  if (publicSeal) {
+    if (publicSeal.valid) return 'supported';
+    if (publicSeal.supported === false) return 'blocked';
+    return 'unsupported';
+  }
+  // Otherwise deliberately never 'supported' with a warrant loaded: the key
+  // document verified in this browser, but the warrant's own v2 signed message
+  // is derived from access-controlled content, so its "valid" is the server's —
+  // a real qualification, not a hedge. Stage 2 spells out the difference.
   return 'qualified';
 }
 
@@ -158,6 +284,7 @@ export default function ProofTheater() {
   const [headNote, setHeadNote] = useState(null);
   const [browserEd, setBrowserEd] = useState(null);
   const [fold, setFold] = useState(null);
+  const [publicSeal, setPublicSeal] = useState(null);
 
   const [payloadDraft, setPayloadDraft] = useState('');
   const [payloadCheck, setPayloadCheck] = useState(null);
@@ -227,6 +354,7 @@ export default function ProofTheater() {
     setLookupError(null);
     setWarrant(null);
     setFold(null);
+    setPublicSeal(null);
     try {
       const body = { limit: REGISTRY_LIMIT };
       if (needle) {
@@ -323,7 +451,7 @@ export default function ProofTheater() {
     const claimState = warrant ? normalizeState(warrant.validity_status) : 'unknown';
     const s = [
       { ...STAGE_META[0], state: claimState, stateLabel: warrant ? undefined : 'No warrant loaded' },
-      { ...STAGE_META[1], state: sealState(keysSeal, warrant, browserEd) },
+      { ...STAGE_META[1], state: sealState(keysSeal, warrant, browserEd, publicSeal) },
       {
         ...STAGE_META[2],
         state: !fold ? 'unknown' : fold.verified ? 'supported' : 'unsupported',
@@ -332,10 +460,38 @@ export default function ProofTheater() {
       { ...STAGE_META[3], state: 'qualified', stateLabel: 'Read the limits' },
     ];
     return s;
-  }, [warrant, keysSeal, browserEd, fold]);
+  }, [warrant, keysSeal, browserEd, fold, publicSeal]);
 
   const pem = keysDoc?.keys?.[0]?.public_key_pem || null;
   const activeKey = keysDoc?.keys?.[0]?.key_id || null;
+  // Does this warrant even carry a public seal? Warrants issued before the seal
+  // existed do not, and that is a different fact from a seal that failed.
+  const publiclySealed = !!warrant && (warrant.publicly_sealed === true || !!warrant.public_seal);
+  const boundary = warrant ? boundaryNote(warrant, publiclySealed) : null;
+
+  // ——— the public seal, verified in this browser the moment both halves exist
+  useEffect(() => {
+    if (!publiclySealed) { setPublicSeal(null); return undefined; }
+    // Hold while the key document is still in flight. Running now would report
+    // "no public key" — a not-yet rendered as a failure, which is the exact lie
+    // this page exists to avoid. Once the fetch settles (document or error), the
+    // check runs and any real key gap is reported honestly.
+    if (!keysDoc && !keysError) { setPublicSeal(null); return undefined; }
+    let cancelled = false;
+    verifyPublicSeal(warrant, pem)
+      .then((r) => { if (!cancelled) setPublicSeal(r); })
+      .catch((e) => {
+        if (!cancelled) {
+          setPublicSeal({
+            supported: true, valid: false, failedStep: 'exception',
+            reason: String(e?.message || e), payload: null, payload_hash: null,
+            canonical: null, publishedHash: null, hashMatches: null, sealed: true,
+            keyId: warrant?.public_seal_key_id || null, signature: null,
+          });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [warrant, pem, publiclySealed, keysDoc, keysError]);
 
   return (
     <div className="min-h-screen bg-[#070A0F] text-slate-200">
@@ -640,13 +796,23 @@ console.log('signature valid:', await crypto.subtle.verify(
                     <Binary className="h-4 w-4 text-slate-400" />
                     <span className="text-sm font-medium text-white">This warrant&apos;s own seal</span>
                   </div>
-                  {warrant ? (
+                  {!warrant ? (
+                    <EpistemicBadge state="unknown" label="No warrant loaded" />
+                  ) : !warrant.signature_valid ? (
+                    <EpistemicBadge state="unsupported" label="Signature did NOT verify" />
+                  ) : publiclySealed ? (
                     <EpistemicBadge
-                      state={warrant.signature_valid ? 'qualified' : 'unsupported'}
-                      label={warrant.signature_valid ? 'Valid — server-verified' : 'Signature did NOT verify'}
+                      state={!publicSeal ? 'unknown' : publicSeal.valid ? 'supported' : publicSeal.supported === false ? 'blocked' : 'unsupported'}
+                      label={!publicSeal
+                        ? 'Checking the public seal…'
+                        : publicSeal.valid
+                          ? 'Public seal verified here'
+                          : publicSeal.supported === false
+                            ? 'This browser cannot run the check'
+                            : `Public seal failed at: ${publicSeal.failedStep}`}
                     />
                   ) : (
-                    <EpistemicBadge state="unknown" label="No warrant loaded" />
+                    <EpistemicBadge state="qualified" label="Valid — server-verified" />
                   )}
                 </div>
 
@@ -673,13 +839,55 @@ console.log('signature valid:', await crypto.subtle.verify(
                       <div className="flex items-start gap-2">
                         <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: '#C9B08A' }} />
                         <div className="text-[11.5px] leading-relaxed text-slate-300">
-                          <strong className="font-medium text-slate-200">What your browser cannot do here, and why.</strong>{' '}
-                          {warrant.publicly_verifiable
-                            ? 'This seal is Ed25519 and the key is published — but the bytes it signs are derived from the warrant\'s conclusion, premises and sources, and that content is access-controlled. A stranger cannot rebuild the signed message, so the "valid" above is the server\'s reconstruction of it, not yours. What you can check yourself is directly below.'
-                            : 'This warrant carries a legacy seal (HMAC or a content fingerprint). Those verify server-side only: publishing an HMAC key would make the seal forgeable by anyone who read it. Treat this as the server attesting, not as public proof.'}
+                          <strong className="font-medium text-slate-200">{boundary?.title}</strong>{' '}
+                          {boundary?.body}
                         </div>
                       </div>
                     </div>
+
+                    {publiclySealed ? (
+                      <PublicSealPanel
+                        seal={publicSeal}
+                        artifact={warrant.public_seal}
+                        publishedHash={warrant.public_payload_hash}
+                        activeKey={activeKey}
+                      />
+                    ) : null}
+
+                    {publiclySealed ? (
+                      <SelfVerify
+                        title="the public seal, from the registry response alone"
+                        code={`// Nothing here comes from us but the response you already have + the key document.
+const jcs = (v) => v === null ? 'null'
+  : Array.isArray(v) ? '[' + v.map(jcs).join(',') + ']'
+  : typeof v === 'object' ? '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + jcs(v[k])).join(',') + '}'
+  : JSON.stringify(v);
+
+const w = ${JSON.stringify({
+                          warrant_id: warrant.warrant_id,
+                          answer_version_id: warrant.answer_version_id,
+                          answer_text_sha256: warrant.answer_text_sha256 ?? null,
+                          conclusion_sha256: warrant.conclusion_sha256 ?? null,
+                          premises_sha256: warrant.premises_sha256 ?? null,
+                          sources_sha256: warrant.sources_sha256 ?? null,
+                          created_date: warrant.created_date,
+                        }, null, 2)};
+
+const payload = { schema: 'aether.warrant.public.v1', ...w };   // 8 keys, nothing else
+const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(jcs(payload))))]
+  .map(b => b.toString(16).padStart(2, '0')).join('');
+console.log('hash matches:', hash === ${JSON.stringify(warrant.public_payload_hash || '')});   // ${publicSeal ? publicSeal.hashMatches : '?'}
+
+const doc = await (await fetch(FUNCTION_URL + '/warrantRegistry?op=keys')).json();
+const pem = doc.keys.find(k => k.key_id === ${JSON.stringify(warrant.public_seal_key_id || '')})?.public_key_pem || doc.keys[0].public_key_pem;
+const der = Uint8Array.from(atob(pem.replace(/-----[^-]+-----|\\s/g, '')), c => c.charCodeAt(0));
+const key = await crypto.subtle.importKey('spki', der, { name: 'Ed25519' }, false, ['verify']);
+const sig = Uint8Array.from(atob(${JSON.stringify(warrant.public_seal || '')}.slice(13).replace(/-/g,'+').replace(/_/g,'/')), c => c.charCodeAt(0));
+console.log('public seal valid:', await crypto.subtle.verify(
+  { name: 'Ed25519' }, key, sig, new TextEncoder().encode(hash)));   // ${publicSeal ? publicSeal.valid : '?'}
+// The signed message is the UTF-8 bytes of the hash HEX STRING, not the raw digest.`}
+                      />
+                    ) : null}
 
                     {warrant.payload_hash_v2 ? (
                       <div className="mt-4 border-t border-white/10 pt-4">
@@ -849,8 +1057,10 @@ console.log('inclusion proven:', sn === 0 && hex(node) === root);   // ${fold ? 
                       <strong className="font-medium text-slate-200">Legacy HMAC seals verify server-side only.</strong>{' '}
                       An HMAC key cannot be published without becoming a forging key, so for those warrants &ldquo;valid&rdquo;
                       means <em>we say so</em>. Only <span className="font-mono text-[11px]">Ed25519</span> seals are
-                      publicly checkable, and even then the message they sign is derived from access-controlled content
-                      (stage 2 says exactly how far you can get).
+                      publicly checkable, and the v2 seal signs a message derived from access-controlled content, so a
+                      stranger cannot rebuild it. The newer <em>public seal</em> can be rebuilt and checked in your
+                      browser — but it commits to <em>hashes</em> of the content, so it proves those hashes are the ones
+                      we signed, never what the content says (stage 2 runs it and states the boundary).
                     </span>
                   </li>
                   <li className="flex gap-3">

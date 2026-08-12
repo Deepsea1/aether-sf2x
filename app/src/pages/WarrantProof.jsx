@@ -27,6 +27,17 @@ function schemeBadge(v) {
   return { label: `${v.signature_scheme || 'unknown'} — legacy seal`, cls: 'text-slate-300 border-white/20 bg-white/5' };
 }
 
+// The listing window we ask the registry for — the same 500 the Proof Theater
+// uses, and the registry's own ceiling.
+//
+// THE BUG THIS FIXES (kept as a warning): this page used to send limit: 1. The
+// registry builds its Merkle tree from the window it just listed, so a window of
+// one leaf means only the single newest warrant can ever be proven — every other
+// warrant fell outside the tree and came back inclusion_proof: null, silently,
+// on the page whose entire job is public proof. A narrow window does not make a
+// proof smaller; it makes it non-existent.
+const REGISTRY_LIMIT = 500;
+
 // Client-side RFC 6962 inclusion check — recomputes leaf → root with WebCrypto
 // only, so "this warrant is in the log" is verified in YOUR browser, not taken
 // on the server's word. Mirrors shared/merkle.js (RFC6962-SHA256): leaf hash =
@@ -100,7 +111,9 @@ export default function WarrantProof() {
     setResult(null);
     try {
       // The signature artifact always starts with sf2x_ — anything else is an id.
-      const payload = needle.startsWith('sf2x_') ? { signed_hash: needle, limit: 1 } : { warrant_id: needle, limit: 1 };
+      const payload = needle.startsWith('sf2x_')
+        ? { signed_hash: needle, limit: REGISTRY_LIMIT }
+        : { warrant_id: needle, limit: REGISTRY_LIMIT };
       const res = await base44.functions.invoke('warrantRegistry', payload);
       const data = res?.data || res;
       const v = data?.verified_warrant;
@@ -307,7 +320,36 @@ export default function WarrantProof() {
               )}
             </div>
 
-            {v.inclusion_proof && result?.merkle_root && (
+            {!(v.inclusion_proof && result?.merkle_root) ? (
+              <div className="rounded-2xl border border-white/10 bg-[#0B0F16] p-5 mb-6">
+                <div className="text-sm font-medium text-white mb-3 flex items-center gap-2"><Hash className="h-4 w-4" /> Transparency proof</div>
+                <div className="flex items-center gap-2 text-sm text-slate-300">
+                  <ShieldQuestion className="h-4 w-4 text-slate-400" />
+                  {!v.inclusion_proof
+                    ? 'No inclusion proof was issued for this warrant.'
+                    : 'This response published no Merkle root, so there is nothing to fold against.'}
+                </div>
+                <div className="mt-4 pt-4 border-t border-white/10 text-[12px] text-slate-400 leading-relaxed">
+                  {!v.inclusion_proof ? (
+                    <>
+                      The registry proves inclusion only for warrants inside its current listing window — the newest{' '}
+                      <span className="tabular-nums text-slate-300">{REGISTRY_LIMIT}</span> by issue date, of which this
+                      response carried{' '}
+                      <span className="tabular-nums text-slate-300">{result?.count ?? 'an unstated number'}</span>. This
+                      warrant falls outside that window, so no proof was issued: a proof folded against a root the
+                      warrant is not actually under would be worse than none. Nothing above is weakened by this — it is a
+                      proof that was never issued, not a proof that failed. Older warrants are covered by the signed tree
+                      heads over the full log (<span className="font-mono text-slate-300">warrantRegistry?op=checkpoint</span>).
+                    </>
+                  ) : (
+                    <>
+                      Without a published root there is no value to compare a recomputed path against, so this page
+                      claims no inclusion verdict — neither pass nor fail.
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : (
               <div className="rounded-2xl border border-white/10 bg-[#0B0F16] p-5 mb-6">
                 <div className="text-sm font-medium text-white mb-3 flex items-center gap-2"><Hash className="h-4 w-4" /> Transparency proof</div>
                 {proofCheck?.pending ? (

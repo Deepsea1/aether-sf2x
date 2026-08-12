@@ -445,6 +445,104 @@ legacy verification stays available server-side forever.
 5. Verify the Ed25519 signature over the UTF-8 bytes of the hex hash string
    using the `public_key_pem` from key discovery (match on `key_id`).
 
+### The public seal (`public_seal`)
+
+The v2 seal above binds **content** — `conclusion`, `premises`, `sources` — and
+the registry deliberately never publishes those (the privacy boundary: the log
+is unauthenticated and enumerable). So a stranger cannot rebuild the v2 signed
+bytes and cannot check that seal; only the holder of the content can.
+
+The **public seal** closes that gap without moving the boundary. It is an
+*additional* Ed25519 signature over a payload made entirely of **published
+material — hashes, never content**. Every field of it comes back in the
+`verified_warrant` block, so any third party rebuilds the exact signed bytes
+from a registry response alone and verifies offline.
+
+```json
+{
+  "schema": "aether.warrant.public.v1",
+  "warrant_id": "<Warrant id>",
+  "answer_version_id": "<AnswerVersion id — the lineage_id in API responses>",
+  "answer_text_sha256": "<lowercase SHA-256 hex of the answer text as persisted>",
+  "conclusion_sha256": "<SHA-256 hex of the conclusion string as persisted>",
+  "premises_sha256": "<SHA-256 hex of the JCS canonicalization of the premises array>",
+  "sources_sha256": "<SHA-256 hex of the JCS canonicalization of the sources array>",
+  "created_date": "<the warrant's created_date, ISO string as stored>"
+}
+```
+
+- **`public_payload_hash`** = lowercase SHA-256 hex over the RFC 8785 (JCS)
+  canonical bytes of that object — the same canonicalization as v2 and the tree
+  heads.
+- **`public_seal`** = Ed25519 over the **UTF-8 bytes of the
+  `public_payload_hash` hex string** (not the raw digest), encoded
+  `sf2x_ed25519_` + base64url. Same convention as every other Aether seal.
+- **`public_seal_key_id`** — which published key signed it; match it against
+  `keys[].key_id` from `?op=keys`.
+- **`publicly_sealed`** — `true` when the warrant carries the seal. Warrants
+  issued before it existed are `false`: **absent, not failed** — there is no
+  seal to check, and no verifier should render that as a failure.
+- The three content hashes use the **values as persisted on the warrant row**;
+  the two array hashes are taken over the JCS canonicalization of the array
+  (`["a","b"]` — no whitespace), not a join.
+
+**Offline verification recipe** — the registry response plus the key document,
+nothing else. Runs in any modern browser console or Node 18.4+:
+
+```js
+const jcs = (v) => v === null ? 'null'
+  : Array.isArray(v) ? '[' + v.map(jcs).join(',') + ']'
+  : typeof v === 'object' ? '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + jcs(v[k])).join(',') + '}'
+  : JSON.stringify(v);
+
+const r = await (await fetch(FUNCTION_URL + '/warrantRegistry', {
+  method: 'POST', headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ warrant_id: WARRANT_ID, limit: 500 }),
+})).json();
+const w = r.verified_warrant;
+if (!w.publicly_sealed) throw new Error('no public seal on this warrant — absent, not failed');
+
+// 1. Rebuild the payload from the PUBLISHED fields. Exactly these 8 keys.
+const payload = {
+  schema: 'aether.warrant.public.v1',
+  warrant_id: w.warrant_id,
+  answer_version_id: w.answer_version_id,
+  answer_text_sha256: w.answer_text_sha256,
+  conclusion_sha256: w.conclusion_sha256,
+  premises_sha256: w.premises_sha256,
+  sources_sha256: w.sources_sha256,
+  created_date: w.created_date,
+};
+
+// 2. Canonicalize (RFC 8785) and hash — this is the message that was signed.
+const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(jcs(payload))))]
+  .map(b => b.toString(16).padStart(2, '0')).join('');
+console.log('hash matches published:', hash === w.public_payload_hash);
+
+// 3. Verify with the published key (match on key_id).
+const doc = await (await fetch(FUNCTION_URL + '/warrantRegistry?op=keys')).json();
+const pem = (doc.keys.find(k => k.key_id === w.public_seal_key_id) || doc.keys[0]).public_key_pem;
+const der = Uint8Array.from(atob(pem.replace(/-----[^-]+-----|\s/g, '')), c => c.charCodeAt(0));
+const key = await crypto.subtle.importKey('spki', der, { name: 'Ed25519' }, false, ['verify']);
+const sig = Uint8Array.from(atob(w.public_seal.slice(13).replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+console.log('public seal valid:', await crypto.subtle.verify(
+  { name: 'Ed25519' }, key, sig, new TextEncoder().encode(hash)));
+```
+
+**What it proves, and what it does not.** A valid public seal proves the
+published hashes and identifiers are exactly the ones Aether signed, and that
+none of them has been altered since — the registry cannot quietly restate a
+warrant's content bindings. It does **not** reveal the content, and it does not
+let you check the content: to do that you must hold the text and hash it
+yourself (`op=eligibility` does exactly this for the answer text, and the same
+hash comparison works for the conclusion, premises and sources). The v2 seal
+remains the binding over the content itself, and remains verifiable only by
+someone who holds it.
+
+The Proof Theater (`/proof`) runs this whole check in the visitor's browser and
+shows each step; for `publicly_sealed: false` warrants it says so plainly rather
+than rendering an absent seal as a failed one.
+
 ### Display eligibility (`op=eligibility`)
 
 `GET|POST /api/functions/warrantRegistry?op=eligibility` (POST callers may put

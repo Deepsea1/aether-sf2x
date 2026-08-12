@@ -16,7 +16,10 @@ const STATIC_ROWS = [
   { label: 'End-user accessibility', aether: 'One-click verify button + Chrome extension', vectara: 'Developer API', galileo: 'Developer platform', cleanlab: 'Data team tool' },
   { label: 'Chrome extension', aether: 'Yes — ChatGPT, Claude, Gemini, Copilot', vectara: 'No', galileo: 'No', cleanlab: 'No' },
   { label: 'Public model leaderboard', aether: 'Yes — daily', vectara: 'No', galileo: 'No', cleanlab: 'No' },
-  { label: 'Pricing (entry)', aether: 'Free — 500 verifications/mo', vectara: 'Usage-based', galileo: 'Custom', cleanlab: 'Custom' },
+  // Free-tier numbers are the ones the server actually enforces: the anonymous
+  // per-IP gate in verifyResponse (5/day) and PLAN_QUOTAS.free in apiAuth.js
+  // (100 credits/mo). Do not round these up — they are the enforced ceilings.
+  { label: 'Pricing (entry)', aether: 'Free — 5 verifications/day, no sign-in · 100 credits/mo on a free API key', vectara: 'Usage-based', galileo: 'Custom', cleanlab: 'Custom' },
   { label: 'Verifiable warrants', aether: 'Yes — signed, auditable', vectara: 'No', galileo: 'No', cleanlab: 'No' },
 ];
 const STATIC_POSITIONING = 'Aether is the only layer that sits inside the conversation alongside any LLM, turns each answer into a warranted trust score in seconds, and ships a one-click verify button for end users — not just developers.';

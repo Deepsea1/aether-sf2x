@@ -253,6 +253,30 @@
       "type": "string",
       "description": "SHA-256 (lowercase hex) of the answer text AS PERSISTED on the AnswerVersion row (post-truncation), so the v2 payload can be rebuilt from entities without embedding the full answer text in the signature input."
     },
+    "conclusion_sha256": {
+      "type": "string",
+      "description": "SHA-256 (lowercase hex) of the conclusion string AS PERSISTED on this row. Part of the public seal payload ('aether.warrant.public.v1') — a hash, never the content, so the registry can publish it without crossing the privacy boundary."
+    },
+    "premises_sha256": {
+      "type": "string",
+      "description": "SHA-256 (lowercase hex) of the RFC 8785 (JCS) canonicalization of the premises array AS PERSISTED on this row. Part of the public seal payload."
+    },
+    "sources_sha256": {
+      "type": "string",
+      "description": "SHA-256 (lowercase hex) of the RFC 8785 (JCS) canonicalization of the sources array AS PERSISTED on this row. Part of the public seal payload."
+    },
+    "public_payload_hash": {
+      "type": "string",
+      "description": "SHA-256 (lowercase hex) of the RFC 8785 canonical JSON of the public seal payload {schema, warrant_id, answer_version_id, answer_text_sha256, conclusion_sha256, premises_sha256, sources_sha256, created_date} — every field of which the warrant registry publishes, so a third party can rebuild and re-hash it from a registry response alone."
+    },
+    "public_seal": {
+      "type": "string",
+      "description": "Ed25519 signature over the UTF-8 bytes of the public_payload_hash hex string, encoded 'sf2x_ed25519_' + base64url. Additive alongside signed_hash_v2: v2 binds content the registry never publishes (so outsiders cannot check it), while this seal binds only published hashes and IS checkable offline against the key document at warrantRegistry?op=keys. Absent on warrants issued before the public seal shipped, or when the Ed25519 keys were unavailable at issuance."
+    },
+    "public_seal_key_id": {
+      "type": "string",
+      "description": "Identifier of the key that produced public_seal: 'ed25519:' + first 16 hex chars of the SHA-256 of the ED25519_PUBLIC_KEY pem string."
+    },
     "service_mode_at_issuance": {
       "type": "string",
       "description": "Service mode active when this warrant was issued (§9.2): 'normal' or a degraded mode from the ServiceModeEvent ledger. Absent on warrants issued before service-mode stamping rolled out."

@@ -592,6 +592,21 @@ async function opEligibility(req, svc, body) {
   }
 }
 
+// ——— The public seal: how a stranger checks a warrant with nothing but this
+// response and the published key document. signed_hash_v2 binds warrant CONTENT
+// (conclusion, premises, sources) that this endpoint deliberately never
+// publishes, so an outsider cannot reconstruct its signed bytes — signature_valid
+// below is OUR verification of it, on our side of the privacy boundary. The
+// public seal exists so that verdict does not have to be taken on trust: it
+// signs a payload made entirely of fields published right here.
+const PUBLIC_SEAL_RECIPE = [
+  'Rebuild the payload EXACTLY as: {"schema":"aether.warrant.public.v1", warrant_id, answer_version_id, answer_text_sha256, conclusion_sha256, premises_sha256, sources_sha256, created_date} — every value taken verbatim from this response.',
+  'Canonicalize it per RFC 8785 (JCS), take the lowercase SHA-256 hex of those bytes, and check it equals public_payload_hash.',
+  'Then check public_seal (strip the "sf2x_ed25519_" prefix, base64url-decode) as an Ed25519 signature over the UTF-8 bytes of that hex STRING, using the public key whose key_id matches public_seal_key_id (fetch it from warrantRegistry?op=keys, or any pinned copy).',
+  'What this proves: the issuing key committed to these hashes for this warrant id at this created_date. It does NOT reveal or prove the content behind the hashes — to check those you must already hold the text and hash it yourself.',
+  'publicly_sealed=false means the warrant was issued before the public seal shipped (or with the signing key unavailable). No seal is computed at read time: a signature made now would attest what the row looks like now, which is a different and weaker claim than sealing at issuance.',
+].join(' ');
+
 export default async function (req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -698,6 +713,9 @@ export default async function (req) {
       // leak (fixed in eec0253). Full content stays on the authenticated app
       // surfaces that go through entity RLS. Follow-up: add tenant_id +
       // is_public to Warrant for owner-scoped and opted-in public detail.
+      // The public-seal fields below are HASHES, NEVER CONTENT — they publish
+      // commitments to the content, not the content, so the boundary holds
+      // exactly as before.
       verified = {
         warrant_id: w.id,
         answer_version_id: w.answer_version_id,
@@ -723,6 +741,20 @@ export default async function (req) {
         // published without becoming forgeable) — say so instead of implying more.
         publicly_verifiable: scheme === 'Ed25519' || scheme === 'Ed25519-JCS-v2',
         signature_public_key: scheme === 'Ed25519' || scheme === 'Ed25519-JCS-v2' ? secrets.get('ED25519_PUBLIC_KEY') : null,
+        // ——— The public seal (aether.warrant.public.v1). Hashes only; the
+        // whole signed payload is published here, so a third party rebuilds it
+        // from this response alone and checks the signature offline. Absent on
+        // warrants sealed before this shipped — reported as publicly_sealed
+        // false, never back-filled at read time (see PUBLIC_SEAL_RECIPE).
+        answer_text_sha256: w.answer_text_sha256 || null,
+        conclusion_sha256: w.conclusion_sha256 || null,
+        premises_sha256: w.premises_sha256 || null,
+        sources_sha256: w.sources_sha256 || null,
+        public_payload_hash: w.public_payload_hash || null,
+        public_seal: w.public_seal || null,
+        public_seal_key_id: w.public_seal_key_id || null,
+        publicly_sealed: !!(w.public_seal && w.public_payload_hash && w.answer_text_sha256 && w.conclusion_sha256 && w.premises_sha256 && w.sources_sha256 && w.created_date),
+        public_seal_recipe: PUBLIC_SEAL_RECIPE,
         verifier_lineage: w.roles || [],
         support_confidence: w.support_confidence ?? null,
         detectability_confidence: w.detectability_confidence ?? null,

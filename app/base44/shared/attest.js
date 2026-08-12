@@ -12,7 +12,7 @@ import { callLLMJson } from './llmRouter.js';
 import { runFalsifier, runCoverageCheck } from './falsifier.js';
 import { tribunalCaveat } from './caveat.js';
 import { persistClaimsAndEvidence } from './claimPersistence.js';
-import { buildWarrantV2Payload, signWarrantV2, sha256Hex } from './canonicalSign.js';
+import { buildWarrantV2Payload, signWarrantV2, sha256Hex, buildPublicWarrantPayload, signPublicWarrant } from './canonicalSign.js';
 import { clusterSources } from './independence.js';
 
 // Domain-aware warrant expiry: how fast cited sources rot by domain. Medicine
@@ -599,6 +599,46 @@ export async function attestAnswer(svc, opts) {
     signed_hash: signed, description: `Verified via warrantApi · support ${ver.supported}/${ver.total} · ${ver.validity} · ${ver.grounding.has_authoritative_sources ? 'authoritatively grounded' : 'generic web'} · ${sourceSnapshots.length} sources snapshotted`,
     ...(v2 ? { schema_version: v2.schema_version, payload_hash_v2: v2.payload_hash_v2, signed_hash_v2: v2.signed_hash_v2, key_id_v2: v2.key_id, answer_text_sha256: answerTextSha256 } : {}),
   });
+  // Public seal — the seal an outsider can actually check. v2 above binds
+  // content the registry never publishes, so nobody outside can rebuild its
+  // signed bytes; this one binds ids + hashes of that same persisted content,
+  // all of which the registry DOES publish. It can only be computed once the
+  // row exists (warrant_id and created_date are signed), hence the .update.
+  // Hashes exactly the values persisted above — the same discipline as
+  // answer_text_sha256. Wrapped: a sealing failure leaves the warrant
+  // publicly-unsealed, which the registry states plainly; it never fails an
+  // attestation.
+  try {
+    // created_date is part of what is signed and must be the value the registry
+    // publishes. The create() response carries it (the same assumption
+    // warrantRegistry's publicHead makes of TreeHead.create) — but if it ever
+    // does not, re-read rather than let every warrant fail to seal silently.
+    const row = warrant.created_date ? warrant : (await svc.entities.Warrant.get(warrant.id).catch(() => null)) || warrant;
+    const pub = await buildPublicWarrantPayload({
+      warrant_id: warrant.id,
+      answer_version_id: av.id,
+      answer_text_sha256: answerTextSha256,
+      conclusion: answerText.slice(0, 1000),
+      premises: warrantPremises,
+      sources,
+      created_date: row.created_date,
+    });
+    const sealed = await signPublicWarrant(pub);
+    if (sealed) {
+      await svc.entities.Warrant.update(warrant.id, {
+        // answer_text_sha256 is re-asserted here (same value the create wrote)
+        // so a warrant can never carry a public seal whose payload references a
+        // hash the row does not publish.
+        answer_text_sha256: answerTextSha256,
+        conclusion_sha256: pub.conclusion_sha256,
+        premises_sha256: pub.premises_sha256,
+        sources_sha256: pub.sources_sha256,
+        public_payload_hash: sealed.public_payload_hash,
+        public_seal: sealed.public_seal,
+        public_seal_key_id: sealed.public_seal_key_id,
+      });
+    }
+  } catch (e) { console.error('warrant public seal failed:', e?.message || e); }
   await svc.entities.AnswerVersion.update(av.id, { warrant_id: warrant.id });
 
   // Persist discrete Claim + EvidencePack records for claim-level auditability.

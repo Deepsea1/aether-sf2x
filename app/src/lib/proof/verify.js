@@ -25,6 +25,22 @@
 //      { supported: false } so the UI can say "your browser cannot do this"
 //      rather than rendering a failure that is really a capability gap.
 //
+// Which seals those three combine into:
+//
+//   · the KEY DOCUMENT and the SIGNED TREE HEAD — both sign payloads made of
+//     published fields, so both are fully checkable here.
+//   · a warrant's v2 seal (signed_hash_v2) — NOT checkable by a stranger. Its
+//     signed payload contains the conclusion, premises and sources themselves,
+//     and the registry deliberately never publishes those (the privacy
+//     boundary). Only a content owner can rebuild those bytes.
+//   · a warrant's PUBLIC seal (public_seal) — checkable here, and the point of
+//     publicWarrantPayload / verifyPublicSeal below. It signs a payload of
+//     HASHES of that same content plus the identifiers, every field of which
+//     the registry does publish, so the browser can rebuild the exact signed
+//     bytes from a registry response alone. Content stays private; only digests
+//     travel. It proves the registry's published hashes are the ones Aether
+//     signed — it does NOT reveal, or let you check, the content behind them.
+//
 // Every function fails CLOSED and names the step that broke. Nothing here ever
 // returns a bare boolean for a multi-step check — the caller gets the trail.
 
@@ -38,7 +54,23 @@ export const SCHEMA = {
   keys: 'aether.keys.v1',
   treeHead: 'aether.treehead.v1',
   warrantV2: 'aether.warrant.v2',
+  warrantPublic: 'aether.warrant.public.v1',
 };
+
+/**
+ * The public seal's payload fields, in contract order. Every one of them is
+ * material the registry publishes — that is the whole design: a stranger can
+ * rebuild the signed bytes from a registry response and nothing else.
+ */
+export const PUBLIC_WARRANT_FIELDS = [
+  'warrant_id',
+  'answer_version_id',
+  'answer_text_sha256',
+  'conclusion_sha256',
+  'premises_sha256',
+  'sources_sha256',
+  'created_date',
+];
 
 const subtle = (typeof globalThis !== 'undefined' && globalThis.crypto && globalThis.crypto.subtle) || null;
 
@@ -285,6 +317,45 @@ export function treeHeadPayload(head) {
   };
 }
 
+/**
+ * The exact payload the PUBLIC warrant seal commits to — rebuilt from a
+ * registry response, field by field, verbatim.
+ *
+ *   { schema, warrant_id, answer_version_id, answer_text_sha256,
+ *     conclusion_sha256, premises_sha256, sources_sha256, created_date }
+ *
+ * Three deliberate rules:
+ *
+ *   · VERBATIM. Values are taken exactly as published — no lowercasing, no
+ *     trimming, no date reformatting. Any "helpful" normalization here would
+ *     change the bytes and produce a hash that never matches, which reads as a
+ *     forged record when it is really a buggy verifier.
+ *   · FAIL CLOSED on a missing field. Coercing an absent value to '' would
+ *     silently rebuild a DIFFERENT payload; returning null lets the caller say
+ *     which field the record is missing.
+ *   · The schema tag is PINNED to the version this verifier implements, never
+ *     adopted from the response. If the registry moves to a new schema, the
+ *     rebuild must fail visibly rather than canonicalize whatever it is told.
+ *
+ * @returns the payload object, or null when it cannot be rebuilt.
+ */
+export function publicWarrantPayload(fields) {
+  if (!fields || typeof fields !== 'object') return null;
+  const payload = { schema: SCHEMA.warrantPublic };
+  for (const key of PUBLIC_WARRANT_FIELDS) {
+    const value = fields[key];
+    if (typeof value !== 'string' || !value) return null;
+    payload[key] = value;
+  }
+  return payload;
+}
+
+/** Which contract fields a registry response is missing — for naming the gap, not guessing past it. */
+export function missingPublicWarrantFields(fields) {
+  if (!fields || typeof fields !== 'object') return [...PUBLIC_WARRANT_FIELDS];
+  return PUBLIC_WARRANT_FIELDS.filter((key) => typeof fields[key] !== 'string' || !fields[key]);
+}
+
 // ————————————————————————————————————————————————————————— Ed25519 (SPKI PEM)
 
 export function base64UrlToBytes(b64url) {
@@ -424,11 +495,141 @@ export async function verifySealedDocument({ payload, publishedHash, signature, 
   return result;
 }
 
+/**
+ * Verify a warrant's PUBLIC seal entirely in this browser.
+ *
+ * Rebuild the payload from the published hashes → canonicalize it (RFC 8785) →
+ * SHA-256 it here → check the Ed25519 signature over that hex string with the
+ * key from ?op=keys. No server round-trip, and the registry's own verdict is
+ * never substituted for the result.
+ *
+ * The published `public_payload_hash` is a CROSS-CHECK, not the thing under
+ * test: the signature is verified against the hash this browser computed. A
+ * published hash that disagrees means the record does not describe what was
+ * signed, and fails closed. A record that publishes no hash at all is not a
+ * failure — the local hash is the stronger input anyway — so the check
+ * continues and reports `hashMatches: null`.
+ *
+ * @param {object} registryWarrant  a verified_warrant block from warrantRegistry
+ * @param {string} pemPublicKey     SPKI PEM from the key document
+ * @returns {Promise<{
+ *   supported: boolean, valid: boolean, reason: string|null,
+ *   payload: object|null, payload_hash: string|null,
+ *   canonical: string|null, publishedHash: string|null, hashMatches: boolean|null,
+ *   sealed: boolean, keyId: string|null, signature: object|null, failedStep: string|null,
+ * }>}
+ */
+export async function verifyPublicSeal(registryWarrant, pemPublicKey) {
+  const result = {
+    supported: true,
+    valid: false,
+    reason: null,
+    payload: null,
+    payload_hash: null,
+    canonical: null,
+    publishedHash: null,
+    hashMatches: null,
+    sealed: false,
+    keyId: null,
+    signature: null,
+    failedStep: null,
+  };
+
+  if (!registryWarrant || typeof registryWarrant !== 'object') {
+    result.failedStep = 'input';
+    result.reason = 'No warrant record was supplied, so there is nothing to check.';
+    return result;
+  }
+
+  result.keyId = registryWarrant.public_seal_key_id || null;
+  result.publishedHash = registryWarrant.public_payload_hash
+    ? String(registryWarrant.public_payload_hash).toLowerCase()
+    : null;
+
+  const artifact = typeof registryWarrant.public_seal === 'string' ? registryWarrant.public_seal : '';
+  result.sealed = registryWarrant.publicly_sealed === true || !!artifact;
+
+  // ABSENT IS ABSENT. A warrant issued before the public seal existed has not
+  // failed anything — it simply carries no seal to check, and saying so is the
+  // whole difference between an honest page and a red tick.
+  if (!result.sealed) {
+    result.failedStep = 'unsealed';
+    result.reason = 'This warrant carries no public seal — it pre-dates the seal. Nothing failed here; there is nothing to check.';
+    return result;
+  }
+  if (!artifact) {
+    result.failedStep = 'seal';
+    result.reason = 'The registry marks this warrant publicly sealed but published no signature artifact. That contradiction is reported, not resolved in the registry’s favour.';
+    return result;
+  }
+
+  // Optional: if the record names its own schema and it is not the one this
+  // verifier implements, stop. Adopting it would rebuild the payload to the
+  // server's dictation; guessing past it would hash the wrong shape.
+  const publishedSchema = registryWarrant.public_schema;
+  if (typeof publishedSchema === 'string' && publishedSchema && publishedSchema !== SCHEMA.warrantPublic) {
+    result.failedStep = 'schema';
+    result.reason = `The record is sealed under schema ${publishedSchema}; this page implements ${SCHEMA.warrantPublic}. Rebuilding it here would be a guess.`;
+    return result;
+  }
+
+  const payload = publicWarrantPayload(registryWarrant);
+  if (!payload) {
+    result.failedStep = 'payload';
+    result.reason = `The published record is missing ${missingPublicWarrantFields(registryWarrant).join(', ')} — the signed payload cannot be rebuilt from it.`;
+    return result;
+  }
+  result.payload = payload;
+
+  try {
+    const { canonical, hash } = await canonicalPayloadHash(payload);
+    result.canonical = canonical;
+    result.payload_hash = hash;
+  } catch (e) {
+    result.failedStep = 'canonicalize';
+    result.reason = `Canonicalization failed: ${e && e.message}`;
+    return result;
+  }
+
+  if (result.publishedHash) {
+    result.hashMatches = result.publishedHash === result.payload_hash;
+    if (!result.hashMatches) {
+      result.failedStep = 'hash';
+      result.reason = 'The hash rebuilt from the published fields is not the hash the registry published. The record does not describe what was signed.';
+      return result;
+    }
+  }
+
+  if (!pemPublicKey) {
+    result.failedStep = 'key';
+    result.reason = 'No public key was published, so the seal cannot be checked here.';
+    return result;
+  }
+
+  result.signature = await verifyEd25519(result.payload_hash, artifact, pemPublicKey);
+  if (!result.signature.supported) {
+    result.supported = false;
+    result.failedStep = 'unsupported';
+    result.reason = result.signature.reason;
+    return result;
+  }
+  if (!result.signature.valid) {
+    result.failedStep = 'signature';
+    result.reason = result.signature.reason;
+    return result;
+  }
+
+  result.valid = true;
+  return result;
+}
+
 export default {
   SCHEMA, MERKLE_ALGORITHM, LEAF_PREFIX, NODE_PREFIX, ED25519_ARTIFACT_PREFIX,
+  PUBLIC_WARRANT_FIELDS,
   utf8Bytes, toHex, fromHex, concatBytes, sha256Bytes, sha256Hex,
   leafHash, nodeHash, foldInclusionProof, verifyInclusion,
   jcsCanonicalize, canonicalPayloadHash, keysDocumentPayload, treeHeadPayload,
+  publicWarrantPayload, missingPublicWarrantFields,
   base64UrlToBytes, pemToDer, parseSignatureArtifact, ed25519Supported, verifyEd25519,
-  verifySealedDocument,
+  verifySealedDocument, verifyPublicSeal,
 };

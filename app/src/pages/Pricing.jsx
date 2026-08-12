@@ -19,7 +19,7 @@ const PLANS = [
   {
     id: 'free', name: 'Free', price: 0, free: true,
     blurb: 'Try the truth layer. No sign-in required.',
-    features: ['5 verifications / day (abuse guard)', 'No sign-in required', 'Full tribunal + red-team', 'Signed warrants', 'Community support'],
+    features: ['5 verifications / day (abuse guard)', '100 credits / mo on a free API key', 'No sign-in required', 'Full tribunal + red-team', 'Signed warrants', 'Community support'],
   },
   {
     id: 'starter', name: 'Starter', price: 20,
