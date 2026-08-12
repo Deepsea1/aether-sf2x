@@ -24,11 +24,24 @@ const DEFAULT_BUDGET = 80000;
 export async function callLLMJson(svc, {
   prompt, schema, orModel = DEFAULT_OR_MODEL, b44Model = DEFAULT_B44_MODEL, allowFallback = true, orKey = null,
 }) {
+  // Tier failures were swallowed silently, which cost days of misdiagnosis: a
+  // dead Anthropic model id made tiers 1 and 2 throw, everything landed on
+  // Base44, and the only visible symptom was Base44's "out of integration
+  // credits" — so a MODEL problem looked like a BILLING problem. Every tier now
+  // records why it declined, the reasons are logged, and a tier-3 failure
+  // reports the whole chain instead of just the last complaint.
+  const tierErrors = [];
+  const note = (tier, e) => {
+    const msg = String(e?.message || e).slice(0, 300);
+    tierErrors.push(`${tier}: ${msg}`);
+    console.error(`llmRouter ${tier} declined (${orModel}/${b44Model}):`, msg);
+  };
+
   // Tier 1: Anthropic direct for Claude-family models
   if (!orKey && orModel.startsWith('anthropic/')) {
     try {
       return await callAnthropicJson(prompt, b44Model);
-    } catch (e) { /* fall through to OpenRouter */ }
+    } catch (e) { note('tier1-anthropic', e); }
   }
   // Tier 2: OpenRouter
   const key = orKey || secrets.get('OPENROUTER_API_KEY');
@@ -36,12 +49,24 @@ export async function callLLMJson(svc, {
     try {
       return await callOpenRouterJson(prompt, orModel, orKey);
     } catch (e) {
+      note('tier2-openrouter', e);
       if (!allowFallback || orKey) throw e;
     }
+  } else {
+    note('tier2-openrouter', 'no OPENROUTER_API_KEY configured');
   }
   // Tier 3: Base44 InvokeLLM
-  const res = await svc.integrations.Core.InvokeLLM({ prompt, response_json_schema: schema, model: b44Model });
-  return (res && res.data) ? res.data : res;
+  try {
+    const res = await svc.integrations.Core.InvokeLLM({ prompt, response_json_schema: schema, model: b44Model });
+    return (res && res.data) ? res.data : res;
+  } catch (e) {
+    note('tier3-base44', e);
+    // Surface the FULL chain. Tier 3's error alone is the most misleading
+    // message in the system — it blames credits for whatever broke upstream.
+    const err = new Error(`all LLM tiers failed — ${tierErrors.join(' | ')}`);
+    err.tierErrors = tierErrors;
+    throw err;
+  }
 }
 
 // Lightweight monthly LLM budget gate. Uses the Inquiry count for the current

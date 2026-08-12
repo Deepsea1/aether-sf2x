@@ -87,11 +87,16 @@ async function rawCall(prompt, modelId, userKey) {
       'anthropic-version': ANTHROPIC_VERSION,
       'content-type': 'application/json',
     },
+    // No `temperature`: current Claude models reject it outright
+    // ("400 invalid_request_error: `temperature` is deprecated for this
+    // model"), and because llmRouter used to swallow tier failures, that 400
+    // was invisible — every call fell through to Base44 and surfaced as an
+    // out-of-credits error instead. Determinism for JSON extraction comes from
+    // the schema instruction in the prompt, not a sampling knob.
     body: JSON.stringify({
       model: modelId,
       max_tokens: MAX_TOKENS,
       messages: [{ role: 'user', content: prompt + '\n\nRespond with a single JSON object only — no prose, no markdown fences.' }],
-      temperature: 0.2,
     }),
   });
   if (!res.ok) {
