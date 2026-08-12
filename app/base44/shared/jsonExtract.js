@@ -54,6 +54,38 @@ function tryParseObject(candidate) {
 }
 
 /**
+ * Render a JSON Schema as a compact field contract for the prompt.
+ *
+ * WHY: llmRouter passed `schema` to the Base44 tier only — the Anthropic call
+ * received the prompt and nothing else. VERIFY_SCHEMA marks `confidence` as
+ * required and the prompt asked for it in prose, but with no field contract the
+ * model returned it under whatever name it chose. `v.confidence` was therefore
+ * undefined on every verification, verifierConfidence fell back to 0, and trust
+ * was permanently capped at support_ratio x 60 — which is what produced the
+ * false-blocks on the critical tier. Naming the fields is the fix.
+ *
+ * @param {unknown} schema JSON Schema (object type)
+ * @returns {string} '' when there is nothing usable to describe
+ */
+export function describeSchema(schema) {
+  if (!schema || typeof schema !== 'object') return '';
+  const props = schema.properties;
+  if (!props || typeof props !== 'object') return '';
+  const names = Object.keys(props);
+  if (!names.length) return '';
+
+  const required = Array.isArray(schema.required) ? schema.required : [];
+  const lines = names.map((name) => {
+    const p = props[name] || {};
+    const bits = [p.type || 'any'];
+    if (Array.isArray(p.enum) && p.enum.length) bits.push(`one of: ${p.enum.join(' | ')}`);
+    if (required.includes(name)) bits.push('required');
+    return `  "${name}": ${bits.join(', ')}`;
+  });
+  return `\n\nReturn EXACTLY these top-level fields, using these exact names:\n${lines.join('\n')}\nOmit nothing that is marked required.`;
+}
+
+/**
  * @param {unknown} text raw model output
  * @param {{assumeOpenBrace?: boolean}} [opts] assumeOpenBrace: the assistant
  *   turn was prefilled with '{', so the text starts AFTER that brace.

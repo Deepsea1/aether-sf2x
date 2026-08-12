@@ -9,7 +9,45 @@
 // JSON.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractJsonObject } from '../jsonExtract.js';
+import { extractJsonObject, describeSchema } from '../jsonExtract.js';
+
+// ── describeSchema: the field contract the Anthropic path was missing ────────
+
+test('describeSchema names every top-level field so the model cannot omit one', () => {
+  // llmRouter passed `schema` to the Base44 tier only; the Anthropic call got
+  // the prompt alone. VERIFY_SCHEMA requires `confidence`, the prompt asked for
+  // it in prose, and the model returned it under whatever name it liked — so
+  // verifierConfidence read 0 on every verification and trust was permanently
+  // capped at support_ratio x 60.
+  const s = describeSchema({
+    type: 'object',
+    properties: {
+      claims: { type: 'array' },
+      overall_validity: { type: 'string', enum: ['valid', 'weak', 'invalid'] },
+      confidence: { type: 'number' },
+    },
+    required: ['claims', 'overall_validity', 'confidence'],
+  });
+  assert.ok(s.includes('confidence'), 'the field that was silently missing must be named');
+  assert.ok(s.includes('overall_validity'));
+  assert.ok(s.includes('claims'));
+});
+
+test('describeSchema surfaces enum values and required fields', () => {
+  const s = describeSchema({
+    type: 'object',
+    properties: { overall_validity: { type: 'string', enum: ['valid', 'weak', 'invalid'] } },
+    required: ['overall_validity'],
+  });
+  assert.ok(/valid.*weak.*invalid/s.test(s), `enum values must be stated: ${s}`);
+  assert.ok(/required/i.test(s));
+});
+
+test('describeSchema returns empty string for a missing or malformed schema', () => {
+  for (const bad of [undefined, null, {}, 'nope', 42, { properties: null }]) {
+    assert.equal(describeSchema(bad), '', `expected '' for ${JSON.stringify(bad)}`);
+  }
+});
 
 test('pure JSON parses', () => {
   assert.deepEqual(extractJsonObject('{"a":1,"b":[2,3]}'), { a: 1, b: [2, 3] });

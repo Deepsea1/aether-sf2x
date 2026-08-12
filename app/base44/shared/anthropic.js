@@ -4,7 +4,7 @@
 // and Base44 InvokeLLM is the last-resort fallback.
 
 import { secrets } from 'base44:runtime';
-import { extractJsonObject } from './jsonExtract.js';
+import { extractJsonObject, describeSchema } from './jsonExtract.js';
 
 const ENDPOINT = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -135,9 +135,12 @@ async function rawCall(prompt, modelId, userKey, opts = {}) {
 // fences, and trailing text. The model was answering correctly; only the parser
 // was failing. (Assistant-turn prefill was tried and rejected by the model —
 // see rawCall.)
-export async function callAnthropicJson(prompt, modelValue, userKey) {
+export async function callAnthropicJson(prompt, modelValue, userKey, schema) {
   const modelId = CLAUDE_MODEL_MAP[modelValue] || DEFAULT_MODEL;
-  const cleaned = await rawCall(prompt, modelId, userKey, { rawText: true });
+  // The schema was never sent on this path — see describeSchema. Without a
+  // field contract the model renamed or omitted `confidence`, which pinned
+  // verifierConfidence at 0 and capped every trust score at support_ratio x 60.
+  const cleaned = await rawCall(prompt + describeSchema(schema), modelId, userKey, { rawText: true });
   const parsed = extractJsonObject(cleaned);
   if (parsed) return parsed;
   // Keep a short excerpt: "returned non-JSON" with no sample is undebuggable.

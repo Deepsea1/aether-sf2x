@@ -40,7 +40,7 @@ export async function callLLMJson(svc, {
   // Tier 1: Anthropic direct for Claude-family models
   if (!orKey && orModel.startsWith('anthropic/')) {
     try {
-      return await callAnthropicJson(prompt, b44Model);
+      return await callAnthropicJson(prompt, b44Model, null, schema);
     } catch (e) { note('tier1-anthropic', e); }
   }
   // Tier 2: OpenRouter
