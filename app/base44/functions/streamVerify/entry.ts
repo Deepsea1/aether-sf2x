@@ -31,6 +31,26 @@ const VERIFY_SCHEMA = {
 
 function num(x) { const n = Number(x); return Number.isFinite(n) ? n : 0; }
 
+// Warrant.premises is a string[] — the model can hand back a claim whose
+// `claim` field is an object, a number, or missing, and piping that straight
+// into the entity 500s the whole verification ("Input should be a valid
+// string"). Coerce to text and drop what cannot be represented: a warrant
+// listing one fewer premise is honest; a failed verification over a shape
+// quirk is not. Objects are JSON-encoded rather than dropped so the premise
+// survives in a readable form.
+function toPremiseStrings(claims) {
+  return (Array.isArray(claims) ? claims : [])
+    .map((c) => {
+      const raw = c && typeof c === 'object' ? c.claim : c;
+      if (typeof raw === 'string') return raw.trim();
+      if (raw === null || raw === undefined) return '';
+      if (typeof raw === 'object') { try { return JSON.stringify(raw); } catch { return ''; } }
+      return String(raw);
+    })
+    .filter((s) => s !== '')
+    .slice(0, 20);
+}
+
 export default async function (req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -95,7 +115,7 @@ Decompose the text into discrete factual claims, judge each as supported or unsu
             trust_score, stakes_level: 'medium',
           });
           const warrant = await svc.entities.Warrant.create({
-            answer_version_id: av.id, premises: claims.map((c) => c.claim).slice(0, 20),
+            answer_version_id: av.id, premises: toPremiseStrings(claims),
             conclusion: (v.summary || text.slice(0, 500)), confidence_score: trust_score / 100,
             validity_status: verdict === 'verified' ? 'valid' : verdict === 'contested' ? 'weak' : 'invalid',
             sources: [], expiry_date: new Date(Date.now() + 30 * 86400000).toISOString(),
