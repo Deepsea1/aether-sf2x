@@ -34,6 +34,7 @@
 // authorized, callers pass diff_text and we set the status (which we CAN do).
 
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { requireAdmin } from '../../shared/auth.js';
 import { extractClaimsFromDiff, extractClaims } from '../../shared/claimExtractor.js';
 import { flashScanBatch } from '../../shared/aetherFlash.js';
 import { parsePolicyYaml, evaluatePolicy, computePolicyHash } from '../../shared/policyParser.js';
@@ -82,11 +83,26 @@ release_gate:
 // effective model id so cached deterministic verdicts can never satisfy it.
 const EVAL_MODEL = 'deterministic';
 
+// ADMIN ONLY — the same confused-deputy reasoning spelled out in
+// githubStatusCheck/entry.ts: the connector token is Aether's own GitHub
+// identity and owner/repo arrive in the request body, so a bare authenticated
+// check let any signed-up account spend that token against any repo it can
+// reach. This function is strictly the more dangerous of the two, because
+// beyond writing it also READS through that token — the PR diff and the repo's
+// .aether/policy.yml — and returns claim text extracted from that diff in its
+// response, which turns it into a cross-repo read primitive; and it posts PR
+// reviews (up to request_changes) under Aether's name.
+//
+// entities/Claim.jsonc describes this as an "authenticated per-customer
+// endpoint". That intent is not reachable yet: it needs a per-installation
+// credential or a repo-entitlement record so a customer can be scoped to their
+// own repos, and neither exists today. Admin-gated until one does.
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
-    const user = await base44.auth.me();
-    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await requireAdmin(base44);
+    if (!auth.ok) return auth.response;
+    const user = auth.user;
 
     if (req.method !== 'POST') return Response.json({ error: 'Method not allowed' }, { status: 405 });
     const body = await req.json().catch(() => ({}));

@@ -1,15 +1,31 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
+import { requireAdmin } from '../../shared/auth.js';
 
 // GitHub commit/PR status check — sets a commit status (success/failure) based
 // on Aether's trust score. Used in CI/CD to block merges on low-trust AI output.
 // Authorized scope: repo:status (set commit statuses only).
+//
+// ADMIN ONLY. The connector token fetched below is Aether's own GitHub identity,
+// not the caller's, while `owner`/`repo`/`sha` come straight from the request
+// body — and validateGithubPathParams only stops URL retargeting, it does not
+// constrain WHICH repo gets written. So a bare "is there a user" check made this
+// a confused deputy: any signed-up account could spend Aether's token to stamp
+// `state: success` + "Aether verified · trust <the caller's own number>/100"
+// onto any commit in any repo that token can reach. trust_score is caller-
+// supplied, so the badge was forgeable by anyone who could reach the function at
+// all — and wherever branch protection requires the "Aether Truth Layer" context,
+// that walks an arbitrary commit through the merge gate.
+//
+// Base44 connectors are a single platform-wide connection, so there is no
+// per-customer GitHub credential to scope a caller to their own repos, and no
+// repo-entitlement record exists in the entity set. Until one of those exists,
+// admin — which per shared/auth.js also covers the platform workflow principal —
+// is the only caller that can be authorized for a write made with this token.
 export default async function (req) {
   try {
     const base44 = createClientFromRequest(req);
-    const user = await base44.auth.me();
-    if (!user) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const auth = await requireAdmin(base44);
+    if (!auth.ok) return auth.response;
 
     const body = await req.json().catch(() => ({}));
     const { owner, repo, sha, trust_score, verdict, inquiry_id, description } = body;
