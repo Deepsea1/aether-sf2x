@@ -11,24 +11,80 @@ import { flashScan } from './aetherFlash.js';
 // Sentence splitter — handles common sentence terminators while preserving
 // abbreviations roughly (a full sentence boundary parser would be better, but
 // this is sufficient for claim extraction from diffs and markdown).
+// MIN_WEAK is the old `length > 20`. MIN_STRONG is lower because a sentence
+// carrying a hard quantity is material even when short — the old floor dropped
+// "Uptime was 99.99%." (18 chars) outright, which the §6.3 corpus caught.
+const MIN_STRONG_LEN = 12;
+const MIN_WEAK_LEN = 21;
+
 function splitSentences(text) {
   return String(text || '')
     .replace(/\n+/g, ' ')
     .replace(/([.!?])\s+(?=[A-Z0-9])/g, '$1\n')
     .split('\n')
     .map((s) => s.trim())
-    .filter((s) => s.length > 20 && s.length < 1000);
+    .filter((s) => s.length >= MIN_STRONG_LEN && s.length < 1000);
 }
 
-// Factual indicators — a sentence is a "claim" if it contains at least one.
-const FACTUAL_PATTERNS = [
-  /\b\d+%\b/, /\$\d/, /\b\d{4}\b/, /\b\d+[.,]?\d*\s*(million|billion|trillion|thousand)\b/i,
+// Evidence is tiered, because the old flat list let a bare copula ("is", "are")
+// carry the same weight as a measured quantity. That cost precision on opinion
+// ("We are proud of...") while still missing plainly material statements whose
+// verb happened to be absent from the list ("The SDK supports Python 3.9").
+//
+// STRONG — a hard, checkable assertion: quantities, money, dates, standards,
+// and verbs that state a fact about the system. Sufficient on its own.
+const STRONG_PATTERNS = [
+  // Quantities. NOTE: the previous /\b\d+%\b/ could never match a percentage
+  // followed by a space — '%' and ' ' are both non-word characters, so the
+  // trailing \b always failed. Every percentage claim that was ever extracted
+  // got in via some other keyword.
+  /\d+(\.\d+)?\s*%/,
+  /\$\s?\d/, /\b\d{4}\b/,
+  /\b\d+[.,]?\d*\s*(million|billion|trillion|thousand|k|m|bn)\b/i,
+  /\b\d+(\.\d+)?\s*(ms|s|sec|seconds?|minutes?|hours?|days?|weeks?|months?|years?|gb|mb|kb|tb)\b/i,
+  /\b(one|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand|million|billion)\s+(\w+\s+)?(per|requests?|users?|transactions?|verifications?|days?|seconds?|minutes?)\b/i,
+  // Standards, certifications, guarantees.
+  /\bsoc\s*2\b/i, /\biso\s*\d{4,5}\b/i, /\bhipaa\b/i, /\bgdpr\b/i, /\baes-?\d{3}\b/i,
+  /\bcomplian/i, /\bcertif/i, /\bencrypt/i, /\bproven\b/i, /\bguaranteed?\b/i,
+  // Verbs that assert a fact about the system. The originals plus the ones the
+  // gold corpus showed missing.
   /\bincreas/i, /\bdecreas/i, /\breduc/i, /\bimprov/i, /\bshows?\b/i, /\bdemonstrat/i,
-  /\bstudy\b/i, /\bresearch\b/i, /\bproven\b/i, /\bguaranteed?\b/i, /\bsecure/i, /\bencrypt/i,
-  /\bcomplian/i, /\baccord/i, /\breport/i, /\bfound\b/i, /\bresult/i,
-  /\bis\b/i, /\bare\b/i, /\bwas\b/i, /\bwere\b/i, /\bwill\b/i, /\bcan\b/i, /\bhas\b/i, /\bhave\b/i,
-  /\balways\b/i, /\bnever\b/i, /\bevery\b/i, /\ball\b/i, /\bnone\b/i,
+  /\bstudy\b/i, /\bresearch\b/i, /\baccord/i, /\breport/i, /\bfound\b/i, /\bresult/i,
+  /\bsupports?\b/i, /\brequires?\b/i, /\bincludes?\b/i, /\bprovides?\b/i, /\bships?\b/i,
+  /\bscored?\b/i, /\bscores\b/i, /\bachieved?\b/i, /\bachieves\b/i, /\bbegins?\b/i,
+  /\bstarts?\b/i, /\bdrops?\b/i, /\bremoves?\b/i, /\bdeletes?d?\b/i, /\bbilled?\b/i,
+  /\bcosts?\b/i, /\bfell\b/i, /\brose\b/i, /\bgrew\b/i, /\bexceeds?\b/i, /\blimits?\b/i,
+  /\breturns?\b/i, /\bdefaults?\b/i, /\bmeasured\b/i, /\breached\b/i, /\bprocesses\b/i,
+  /\bkicks?\s+in\b/i, /\bsupported\b/i, /\bdeprecated\b/i, /\bremoved\b/i,
+  /\balways\b/i, /\bnever\b/i,
 ];
+
+// WEAK — a copula or modal. Only enough on a longer sentence, where there is
+// more likely to be substance around it.
+const WEAK_PATTERNS = [
+  /\bis\b/i, /\bare\b/i, /\bwas\b/i, /\bwere\b/i, /\bwill\b/i, /\bcan\b/i,
+  /\bhas\b/i, /\bhave\b/i, /\bevery\b/i, /\ball\b/i, /\bnone\b/i,
+];
+
+// HEDGE — speculation, opinion, intent, and questions assert nothing testable.
+// These VETO extraction regardless of other evidence: "we think latency might
+// drop by 40%" contains a quantity but makes no claim, and treating it as one
+// means the gate can block a sentence that never asserted anything.
+const HEDGE_PATTERNS = [
+  /\bmight\b/i, /\bmaybe\b/i, /\bperhaps\b/i, /\bpossibly\b/i, /\bprobably\b/i,
+  /\bwe think\b/i, /\bwe believe\b/i, /\bwe feel\b/i, /\bwe are proud\b/i,
+  /\bworth (exploring|considering)\b/i, /\bconsider(ing)?\b/i, /\bshould we\b/i,
+  /\bwe hope\b/i, /\bseems?\b/i, /\bappears?\b/i, /\bcould be\b/i, /\bmay be\b/i,
+];
+
+// A sentence is a claim when it is not hedged and carries strong evidence, or
+// weak evidence with enough length to be a real statement.
+function isClaimSentence(sentence) {
+  if (/\?\s*$/.test(sentence)) return false;
+  if (HEDGE_PATTERNS.some((p) => p.test(sentence))) return false;
+  if (STRONG_PATTERNS.some((p) => p.test(sentence))) return true;
+  return sentence.length >= MIN_WEAK_LEN && WEAK_PATTERNS.some((p) => p.test(sentence));
+}
 
 // Claim category classifier — keyword-based mapping to the spec's categories.
 export function classifyClaim(text) {
@@ -64,8 +120,7 @@ export function extractClaims(text, { source_asset_type = 'answer_version', sour
   const sentences = splitSentences(text);
   const claims = [];
   for (const sentence of sentences) {
-    const isFactual = FACTUAL_PATTERNS.some((p) => p.test(sentence));
-    if (!isFactual) continue;
+    if (!isClaimSentence(sentence)) continue;
     const category = classifyClaim(sentence);
     const { subject, predicate, object } = decomposeClaim(sentence);
     const flash = flashScan(sentence, { domain });

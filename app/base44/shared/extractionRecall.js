@@ -78,6 +78,8 @@ export function scoreExtractionRecall(cases, extractFn) {
   let nSharedUnit = 0;
   let nDistinct = 0;
   let nCases = 0;
+  let nExtracted = 0;
+  let nSpurious = 0;
   const misses = [];
 
   for (const c of rows) {
@@ -97,6 +99,13 @@ export function scoreExtractionRecall(cases, extractFn) {
 
     // Which extracted unit (if any) carries each gold claim.
     const unitFor = gold.map((g) => units.findIndex((u) => coversGold(u, g)));
+
+    // Precision counterweight: recall alone is trivially gamed by extracting
+    // every sentence. A unit carrying no gold claim is spurious — and every
+    // spurious claim is one more thing that can be wrongly blocked. Counted per
+    // unit, so a unit covering two gold claims is not penalised.
+    nExtracted += units.length;
+    nSpurious += units.filter((u) => !gold.some((g) => coversGold(u, g))).length;
 
     gold.forEach((g, i) => {
       nGold++;
@@ -118,9 +127,14 @@ export function scoreExtractionRecall(cases, extractFn) {
     // null as "not measured" and fails the gate closed on it.
     recall: nGold ? round4(nRecalled / nGold) : null,
     distinct_unit_rate: nGold ? round4(nDistinct / nGold) : null,
+    // null, not 1.0, when nothing was extracted — precision over an empty set
+    // is undefined, and calling it perfect would reward extracting nothing.
+    precision: nExtracted ? round4((nExtracted - nSpurious) / nExtracted) : null,
     n_gold: nGold,
     n_recalled: nRecalled,
     n_shared_unit: nSharedUnit,
+    n_extracted: nExtracted,
+    n_spurious: nSpurious,
     n_cases: nCases,
     misses,
   };

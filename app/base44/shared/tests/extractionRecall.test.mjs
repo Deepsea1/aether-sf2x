@@ -117,6 +117,50 @@ test('recall is rounded to 4 places and never exceeds 1', () => {
   assert.equal(r.recall, 0.3333);
 });
 
+test('precision counts extracted units that carry no gold claim', () => {
+  // Recall alone can be gamed by extracting every sentence. Precision is the
+  // counterweight: broadening the extractor to find more claims must not turn
+  // opinion and questions into claims, because every spurious claim is another
+  // thing that can be wrongly blocked.
+  const cases = [{ id: 'c1', text: 'x', gold_claims: ['API reduces latency by 40%'] }];
+  const r = scoreExtractionRecall(
+    cases,
+    extractorReturning('Our API reduces latency by 40%.', 'We are proud of our work.'),
+  );
+  assert.equal(r.recall, 1);
+  assert.equal(r.n_extracted, 2);
+  assert.equal(r.n_spurious, 1, 'the opinion sentence carries no gold claim');
+  assert.equal(r.precision, 0.5);
+});
+
+test('precision is 1.0 when every extracted unit carries a gold claim', () => {
+  const cases = [{ id: 'c1', text: 'x', gold_claims: ['API reduces latency by 40%'] }];
+  const r = scoreExtractionRecall(cases, extractorReturning('Our API reduces latency by 40%.'));
+  assert.equal(r.precision, 1);
+  assert.equal(r.n_spurious, 0);
+});
+
+test('precision is null when nothing was extracted at all — not 1.0', () => {
+  const cases = [{ id: 'c1', text: 'x', gold_claims: ['API reduces latency by 40%'] }];
+  const r = scoreExtractionRecall(cases, () => []);
+  assert.equal(r.precision, null, 'no extractions means precision is undefined, never perfect');
+  assert.equal(r.recall, 0);
+});
+
+test('one unit covering TWO gold claims is not spurious', () => {
+  const cases = [{
+    id: 'compound',
+    text: 'x',
+    gold_claims: ['the API is SOC 2 compliant', 'the API is HIPAA compliant'],
+  }];
+  const r = scoreExtractionRecall(
+    cases,
+    extractorReturning('The API is SOC 2 compliant and the API is HIPAA compliant.'),
+  );
+  assert.equal(r.n_spurious, 0);
+  assert.equal(r.precision, 1);
+});
+
 test('malformed cases are skipped rather than throwing or inflating the score', () => {
   const cases = [
     null,
