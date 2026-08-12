@@ -49,9 +49,36 @@ test('supported is coerced to a real boolean; notes to a string', () => {
   assert.equal(out2[0].notes, '');
 });
 
-test('non-object entries are dropped', () => {
-  const out = normalizeClaims(['a bare string', null, 42, { claim: 'kept', supported: true }]);
-  assert.deepEqual(out.map((c) => c.claim), ['kept']);
+test('a bare-string claims array is absorbed, not silently emptied', () => {
+  // Regression (caught in review 2026-08-12): dropping non-object entries meant
+  // `claims: ["Paris is in France."]` — a real model shape — produced ZERO
+  // claims and an empty warrant. That fails QUIET, which is worse than the 500
+  // this module exists to prevent. The whole point is that a requested schema
+  // is not a guarantee.
+  const out = normalizeClaims(['Paris is in France.', 'The Seine runs through it.']);
+  assert.deepEqual(out.map((c) => c.claim), ['Paris is in France.', 'The Seine runs through it.']);
+  assert.equal(out[0].supported, false, 'a bare string asserts no support');
+  assert.equal(out[0].notes, '');
+});
+
+test('mixed bare strings and objects both survive', () => {
+  const out = normalizeClaims(['bare one', { claim: 'object one', supported: true }, null, 42]);
+  assert.deepEqual(out.map((c) => c.claim), ['bare one', 'object one', '42']);
+});
+
+test('entries with no recoverable text are still dropped', () => {
+  const out = normalizeClaims([null, undefined, '', '   ', {}, { claim: {} }]);
+  assert.deepEqual(out, []);
+});
+
+test('numeric truthy support is honored; explicit falsey strings are not', () => {
+  // Behavior pinned deliberately (review note): the old code was `!!supported`,
+  // which made the STRING "false" truthy. Coerce by meaning, not by JS truthiness.
+  assert.equal(normalizeClaims([{ claim: 'x', supported: 1 }])[0].supported, true);
+  assert.equal(normalizeClaims([{ claim: 'x', supported: '1' }])[0].supported, true);
+  assert.equal(normalizeClaims([{ claim: 'x', supported: 0 }])[0].supported, false);
+  assert.equal(normalizeClaims([{ claim: 'x', supported: 'false' }])[0].supported, false);
+  assert.equal(normalizeClaims([{ claim: 'x', supported: 'no' }])[0].supported, false);
 });
 
 test('non-array input yields an empty array, never throws', () => {

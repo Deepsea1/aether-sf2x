@@ -39,6 +39,18 @@ function claimText(value) {
   }
 }
 
+// Support flag by MEANING, not JS truthiness: plain `!!value` makes the string
+// "false" true, and a strict `=== true` silently downgrades the `1` and `"yes"`
+// a model may legitimately emit. Anything unrecognized is not support.
+function isSupported(value) {
+  if (value === true || value === 1) return true;
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase();
+    return v === 'true' || v === 'yes' || v === '1';
+  }
+  return false;
+}
+
 /**
  * Normalize a model-produced claims array into typed, persistable records.
  * Entries with no recoverable claim text are dropped — an empty premise is
@@ -51,13 +63,18 @@ export function normalizeClaims(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
   for (const entry of raw) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-    const claim = claimText(entry.claim).slice(0, MAX_CLAIM_CHARS);
+    if (entry == null) continue;
+    // A model may return the claims array as bare strings rather than objects.
+    // Dropping those emptied the warrant SILENTLY — a quiet failure is worse
+    // than the loud one this module was written to prevent — so a non-object
+    // entry is read as the claim text itself, asserting no support.
+    const isRecord = typeof entry === 'object' && !Array.isArray(entry);
+    const claim = claimText(isRecord ? entry.claim : entry).slice(0, MAX_CLAIM_CHARS);
     if (!claim) continue;
     out.push({
       claim,
-      supported: entry.supported === true || entry.supported === 'true' || entry.supported === 'yes',
-      notes: entry.notes == null ? '' : claimText(entry.notes),
+      supported: isRecord ? isSupported(entry.supported) : false,
+      notes: isRecord && entry.notes != null ? claimText(entry.notes) : '',
     });
   }
   return out;
