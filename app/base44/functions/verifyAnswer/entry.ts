@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { secrets } from 'base44:runtime';
 import { verifySignature, signatureScheme, computeTrustworthyRate } from '../../shared/sf2xCore.js';
 import { isCertifiedRun } from '../../shared/redTeam.js';
+import { buildWarrantV2Payload, verifyWarrantV2 } from '../../shared/canonicalSign.js';
 
 // PUBLIC AND UNAUTHENTICATED BY DESIGN — this is not a missing auth check.
 // It backs the public proof surface (/verify/:id, Registry, WarrantProof, Badge,
@@ -42,9 +43,36 @@ export default async function (req) {
     ];
     const stored = (warrant && warrant.signed_hash) || '';
     let signature_valid = false;
-    const scheme = signatureScheme(stored);
-    const signatureKeys = { ed25519PublicKey: secrets.get('ED25519_PUBLIC_KEY'), hmacKey: secrets.get('sf2x_attestation_key') };
-    for (const candidate of variants) { if (await verifySignature(candidate, stored, signatureKeys)) { signature_valid = true; break; } }
+    let scheme = signatureScheme(stored);
+
+    // Prefer the v2 signature (§9.3/§23.3). API- and widget-path warrants carry
+    // ONLY the RFC 8785 v2 fields — no legacy signed_hash — so checking legacy
+    // alone reported scheme 'none' + signature_valid:false for warrants this
+    // pipeline had correctly signed. A real proof displayed as forged is the
+    // inverse of the honesty law, and it is the public proof page (/verify/:id,
+    // Registry, WarrantProof, badges) that reads this field.
+    if (warrant && warrant.signed_hash_v2 && warrant.answer_text_sha256) {
+      const v2Valid = await verifyWarrantV2(
+        buildWarrantV2Payload({
+          answer_version_id: av.id,
+          answer_text_sha256: warrant.answer_text_sha256,
+          conclusion: warrant.conclusion || '',
+          premises: warrant.premises || [],
+          sources: warrant.sources || [],
+        }),
+        warrant.signed_hash_v2,
+      );
+      if (v2Valid) {
+        signature_valid = true;
+        scheme = 'Ed25519 (RFC 8785 v2)';
+      }
+    }
+
+    // Legacy fallback — dual-signed and pre-v2 warrants verify exactly as before.
+    if (!signature_valid && stored) {
+      const signatureKeys = { ed25519PublicKey: secrets.get('ED25519_PUBLIC_KEY'), hmacKey: secrets.get('sf2x_attestation_key') };
+      for (const candidate of variants) { if (await verifySignature(candidate, stored, signatureKeys)) { signature_valid = true; break; } }
+    }
 
     // Certification: only tribunal lineages that ran the red-team stress test
     // (default stage) and resisted/wobbled are certified. Single-model and
@@ -73,6 +101,13 @@ export default async function (req) {
           }
         : null,
       signed_hash: stored,
+      // v2 material so an offline verifier can recompute the canonical payload
+      // hash without this endpoint (§10): the signature it was checked against
+      // and the key that signed it.
+      signed_hash_v2: (warrant && warrant.signed_hash_v2) || null,
+      payload_hash_v2: (warrant && warrant.payload_hash_v2) || null,
+      key_id_v2: (warrant && warrant.key_id_v2) || null,
+      answer_text_sha256: (warrant && warrant.answer_text_sha256) || null,
       signature_scheme: scheme,
       signature_public_key: scheme === 'Ed25519' ? secrets.get('ED25519_PUBLIC_KEY') : null,
       signature_valid,
