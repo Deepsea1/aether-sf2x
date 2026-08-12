@@ -187,49 +187,50 @@ async function opCheckpoint(req, base44, svc, op) {
       return Response.json({ error: 'Ed25519 keys are not configured — refusing to publish an unattested tree head.' }, { status: 503 });
     }
 
-    // Page the ENTIRE Warrant log — the $lte-cursor fail-closed pattern from
-    // ledgerIntegrityCheck (shared/ledger.js): newest-first fetch matching the
-    // platform sort, a seen-set to drop rows re-fetched across cursor-timestamp
-    // boundaries, and a hard stop on any page the cursor cannot advance past.
-    // `truncated` means the scan may not cover the whole log — and a checkpoint
-    // over a partial log is worse than none, so it FAILS CLOSED below instead
-    // of checkpointing whatever was collected.
+    // Read the ENTIRE Warrant log in ONE request, then prove the read was
+    // complete before committing to it.
+    //
+    // WHY NOT A CURSOR PAGER (the 2026-08-12 defect, kept as a warning): this
+    // previously paged with { created_date: { $lte: cursor } }. On this
+    // platform that operator returns ZERO rows — and an unsupported filter is
+    // indistinguishable from "no more rows", so the loop exited believing the
+    // log was fully scanned, `truncated` stayed false, and two heads were
+    // published claiming tree_size 500 over a 1,548-warrant log. They committed
+    // to a SLIDING newest-500 window, so each new warrant silently changed the
+    // root at an unchanged size — which op=consistency then correctly reported
+    // as FORK EVIDENCE. A guard that cannot detect its own blindness is not a
+    // guard. Plain `filter({}, '-created_date', N)` DOES honour large N here
+    // (verified: N=2000 returned all 1,548), so completeness is provable by a
+    // single read plus the saturation check below.
+    //
+    // COMPLETENESS PROOF: request MAX_LEAVES + 1. If the result comes back
+    // saturated (>= the requested limit) the log may extend past what we read,
+    // so we cannot know we saw all of it — FAIL CLOSED. A checkpoint over a
+    // partial log is worse than no checkpoint, because it looks like a
+    // commitment and is not one.
     const rows = [];
-    const seen = new Set();
-    let cursor = null;
     let pagesScanned = 0;
     let truncated = false;
 
-    while (true) {
-      const pageQuery = cursor ? { created_date: { $lte: cursor } } : {};
-      let page;
-      try {
-        page = await svc.entities.Warrant.filter(pageQuery, '-created_date', PAGE_SIZE);
-      } catch {
+    const REQUEST_LIMIT = MAX_LEAVES + 1;
+    try {
+      const all = (await svc.entities.Warrant.filter({}, '-created_date', REQUEST_LIMIT)) || [];
+      pagesScanned = 1;
+      if (all.length >= REQUEST_LIMIT) {
+        // Saturated: the log is at least MAX_LEAVES + 1 rows and this read may
+        // have stopped short of its true end. Refuse rather than guess.
         truncated = true;
-        break;
+      } else {
+        // De-duplicate defensively; the platform sort is authoritative for order.
+        const seen = new Set();
+        for (const w of all) {
+          if (!w || seen.has(w.id)) continue;
+          seen.add(w.id);
+          rows.push(w);
+        }
       }
-      page = page || [];
-      if (!page.length) break;
-      pagesScanned++;
-
-      const fresh = page.filter((w) => w && !seen.has(w.id));
-      if (!fresh.length) {
-        // No progress — every returned row was already collected. A full page
-        // of duplicates means the cursor cannot advance; stop rather than loop.
-        if (page.length >= PAGE_SIZE) truncated = true;
-        break;
-      }
-      if (rows.length + fresh.length > MAX_LEAVES) {
-        truncated = true;
-        break;
-      }
-      for (const w of fresh) seen.add(w.id);
-      rows.push(...fresh);
-
-      if (page.length < PAGE_SIZE) break; // short page — the log is fully scanned
-      cursor = page[page.length - 1].created_date;
-      if (!cursor) { truncated = true; break; } // cannot advance without a cursor date
+    } catch {
+      truncated = true;
     }
 
     if (truncated) {
@@ -318,47 +319,36 @@ const CONSISTENCY_NOTE = [
 ].join(' ');
 
 // The checkpoint_create full-log paging loop, reproduced for this op (the
-// ledgerIntegrityCheck $lte-cursor fail-closed pattern: newest-first pages
-// matching the platform sort, a seen-set for rows re-fetched across cursor
-// boundaries, a hard stop on any page the cursor cannot advance past).
-// opCheckpoint deliberately keeps its own inline copy so its live, admin-gated
-// behavior is byte-for-byte untouched by this addition — IF YOU CHANGE ONE,
-// CHANGE BOTH. `truncated` means the scan may not cover the whole log.
+// single saturating read + completeness check; see the long note in
+// opCheckpoint for why the old $lte cursor pager was blind on this platform).
+// opCheckpoint keeps its own inline copy so its admin-gated behavior stays
+// explicit — IF YOU CHANGE ONE, CHANGE BOTH. `truncated` means the read cannot
+// be proven complete, and every caller must fail closed on it.
 async function scanFullWarrantLog(svc) {
   const rows = [];
-  const seen = new Set();
-  let cursor = null;
   let pagesScanned = 0;
   let truncated = false;
 
-  while (true) {
-    const pageQuery = cursor ? { created_date: { $lte: cursor } } : {};
-    let page;
-    try {
-      page = await svc.entities.Warrant.filter(pageQuery, '-created_date', PAGE_SIZE);
-    } catch {
+  // ONE read, then prove it was complete. Requesting MAX_LEAVES + 1 means a
+  // saturated result is evidence the log may extend past what we read — which
+  // is unprovable, so it fails closed rather than issuing a proof against a
+  // tree we cannot show is the whole tree.
+  const REQUEST_LIMIT = MAX_LEAVES + 1;
+  try {
+    const all = (await svc.entities.Warrant.filter({}, '-created_date', REQUEST_LIMIT)) || [];
+    pagesScanned = 1;
+    if (all.length >= REQUEST_LIMIT) {
       truncated = true;
-      break;
+    } else {
+      const seen = new Set();
+      for (const w of all) {
+        if (!w || seen.has(w.id)) continue;
+        seen.add(w.id);
+        rows.push(w);
+      }
     }
-    page = page || [];
-    if (!page.length) break;
-    pagesScanned++;
-
-    const fresh = page.filter((w) => w && !seen.has(w.id));
-    if (!fresh.length) {
-      if (page.length >= PAGE_SIZE) truncated = true;
-      break;
-    }
-    if (rows.length + fresh.length > MAX_LEAVES) {
-      truncated = true;
-      break;
-    }
-    for (const w of fresh) seen.add(w.id);
-    rows.push(...fresh);
-
-    if (page.length < PAGE_SIZE) break; // short page — the log is fully scanned
-    cursor = page[page.length - 1].created_date;
-    if (!cursor) { truncated = true; break; }
+  } catch {
+    truncated = true;
   }
 
   // The SAME deterministic leaf order + leaf rule as checkpoint_create and the
