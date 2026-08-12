@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GitBranch, ShieldCheck, AlertTriangle, FileText, File, Loader2, ChevronDown, ChevronRight, Copy, Check, ExternalLink, Zap } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import { useToast } from '@/components/ui/use-toast';
@@ -288,7 +288,16 @@ export default function GitHubPrVerify() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [user, setUser] = useState(null);
+  const [loadingUser, setLoadingUser] = useState(true);
   const { toast } = useToast();
+
+  useEffect(() => {
+    base44.auth.me()
+      .then(setUser)
+      .catch(() => setUser(null))
+      .finally(() => setLoadingUser(false));
+  }, []);
 
   const handleVerify = async () => {
     if (!diffText.trim() && (!owner || !repo)) {
@@ -328,6 +337,39 @@ export default function GitHubPrVerify() {
 + According to our latest benchmark, Aether reduces unsupported claims by 40%.
 + The API currently handles 1.2 million requests per second.
 + This implementation is fully compliant with GDPR and HIPAA requirements.`;
+
+  // The backing function is admin-gated: it spends Aether's own GitHub connector
+  // token against whatever owner/repo is submitted, so it cannot be opened to
+  // every signed-in visitor (see base44/functions/githubPrVerify/entry.ts). Say
+  // so here instead of letting the form collect a diff and return a raw 403.
+  if (loadingUser) {
+    return (
+      <div className="min-h-screen bg-[#070A0F]">
+        <PublicNav />
+        <div className="flex items-center justify-center py-20 text-slate-500">
+          <Loader2 className="h-6 w-6 animate-spin" />
+        </div>
+      </div>
+    );
+  }
+
+  if (user?.role !== 'admin') {
+    return (
+      <div className="min-h-screen bg-[#070A0F]">
+        <PublicNav />
+        <div className="mx-auto max-w-xl px-4 sm:px-6 text-center py-20">
+          <ShieldCheck className="h-8 w-8 text-slate-500 mx-auto mb-3" />
+          <h1 className="font-heading text-xl font-semibold text-white">Admin only</h1>
+          <p className="text-sm text-slate-400 mt-2">
+            PR verification writes commit statuses and PR reviews through Aether's own GitHub
+            connector, so it requires an admin account. To run the gate on your own repository,
+            use the <a href="/github-action" className="text-emerald-400 hover:underline">Aether GitHub Action</a> with
+            your API key.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#070A0F]">
