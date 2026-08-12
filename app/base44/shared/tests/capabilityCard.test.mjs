@@ -186,6 +186,75 @@ test('a clean run is still preferred over a newer errored one', async () => {
   assert.ok(!general.benchmark_refs.includes('broken2'), 'the errored run must not be cited');
 });
 
+// ── risk stratification (§18.2) ──────────────────────────────────────────────
+
+test('per-tier rates are computed from that tier only, not a stamped aggregate', async () => {
+  const mk = (tier, cls, caught, n) => Array.from({ length: n }, (_, i) => ({
+    id: `${tier}-${cls}-${i}`, class: cls, caught, risk_tier: tier,
+  }));
+  const run = {
+    id: 'strat1',
+    dataset: 'v2-stratified',
+    items: [
+      // critical: 20 TRUE, all passing → false_block 0
+      ...mk('critical', 'TRUE', true, 20),
+      ...mk('critical', 'FABRICATED', true, 5),
+      // high: 10 TRUE, 2 failing → false_block 0.2
+      ...mk('high', 'TRUE', true, 8),
+      ...mk('high', 'TRUE', false, 2),
+      ...mk('high', 'FABRICATED', true, 5),
+    ],
+  };
+  const [general] = await generateCardData(svcWithAudits([run]));
+  assert.equal(general.false_block_rate_by_risk.critical, 0, 'critical measured on critical items only');
+  assert.equal(general.false_block_rate_by_risk.high, 0.2, 'high measured on high items only');
+  assert.notEqual(
+    general.false_block_rate_by_risk.critical,
+    general.false_block_rate_by_risk.high,
+    'a stamped aggregate would make every tier identical',
+  );
+});
+
+test('a tier whose sample cannot resolve its threshold reports null, not a number', async () => {
+  // critical is gated at 0.05, so the finest measurable non-zero rate needs
+  // n >= 20 TRUE claims. At n=10 the only possible values are 0.0 and 0.1 —
+  // unlock or fail, both artifacts of sample size rather than capability.
+  const mk = (tier, cls, caught, n) => Array.from({ length: n }, (_, i) => ({
+    id: `${tier}-${cls}-${i}`, class: cls, caught, risk_tier: tier,
+  }));
+  const run = {
+    id: 'thin1',
+    dataset: 'v2-stratified',
+    items: [
+      ...mk('critical', 'TRUE', true, 10),   // too few for a 0.05 threshold
+      ...mk('high', 'TRUE', true, 10),       // exactly enough for 0.10
+      ...mk('critical', 'FABRICATED', true, 3),
+    ],
+  };
+  const [general] = await generateCardData(svcWithAudits([run]));
+  assert.equal(general.false_block_rate_by_risk.critical, null, 'underpowered tier must not publish a rate');
+  assert.equal(general.false_block_rate_by_risk.high, 0, 'high has enough TRUE claims to resolve 0.10');
+  assert.ok(
+    general.known_limitations.some((l) => /critical/i.test(l) && /resolve|underpowered|n=/i.test(l)),
+    `limitations must explain the null: ${general.known_limitations.join(' | ')}`,
+  );
+});
+
+test('an underpowered critical tier keeps the gate locked as NOT MEASURED', async () => {
+  const mk = (tier, cls, caught, n) => Array.from({ length: n }, (_, i) => ({
+    id: `${tier}-${cls}-${i}`, class: cls, caught, risk_tier: tier,
+  }));
+  const run = {
+    id: 'thin2',
+    dataset: 'v2-stratified',
+    items: [...mk('critical', 'TRUE', true, 10), ...mk('high', 'TRUE', true, 10), ...mk('high', 'FABRICATED', true, 2)],
+  };
+  const [general] = await generateCardData(svcWithAudits([run]));
+  const gate = enforcingAllowed({ ...general, extraction_recall: 0.95, expires_at: FUTURE, valid_from: PAST });
+  assert.equal(gate.allowed, false);
+  assert.ok(gate.reasons.some((r) => r.includes('critical is not measured')));
+});
+
 test('rates computed from the latest class-labeled run; unlabeled rows never qualify', async () => {
   const negRun = {
     id: 'run1',

@@ -89,6 +89,10 @@
           "error": {
             "type": "string",
             "description": "Execution error for this item, when one occurred (e.g. an exhausted integration quota). Its presence marks the run as an incomplete measurement — capabilityCard skips such runs rather than measuring an outage as verifier capability."
+          },
+          "risk_tier": {
+            "type": "string",
+            "description": "Risk tier of the corpus item: low | moderate | high | critical. LOAD-BEARING — §18.2 gates enforcement on the high and critical tiers, and capabilityCard computes each tier's false-pass/false-block rate from its OWN items when this is present. Without it the suite-wide aggregate is stamped into all four slots, which is how a critical-tier threshold came to be judged on a corpus containing no critical claims. Absent on v1 runs (unstratified), present on v2-stratified runs."
           }
         }
       },

@@ -13,6 +13,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { runVerification } from '../../shared/attest.js';
 import { CORPUS_V1, CORPUS_VERSION } from '../../shared/corpus-v1.js';
+import { CORPUS_V2_STRATIFIED, CORPUS_V2_VERSION } from '../../shared/corpus-v2-stratified.js';
 import { THIN_COVERAGE_V1 } from '../../shared/thinCoverage-v1.js';
 import { emitTelemetry, newTraceId } from '../../shared/telemetry.js';
 import { requireAdmin } from '../../shared/auth.js';
@@ -61,7 +62,14 @@ export default async function (req) {
       summary: `${gate} negative-control run · corpus ${CORPUS_VERSION} · grounded=${grounded} · falsify=${falsify} · foreign=${foreignVendor} · ${CORPUS_V1.length + (includeThin ? THIN_COVERAGE_V1.length : 0)} items`,
     }).catch(() => {});
 
-    const corpus = includeThin ? [...CORPUS_V1, ...THIN_COVERAGE_V1] : CORPUS_V1;
+    // body.corpus: 'v2-stratified' runs the risk-tiered corpus so the card can
+    // publish PER-TIER rates. The v1 default is preserved byte-for-byte — its
+    // items carry no risk_tier, and capabilityCard falls back to the suite-wide
+    // aggregate for those runs exactly as before.
+    const useStratified = body.corpus === 'v2-stratified';
+    const baseCorpus = useStratified ? CORPUS_V2_STRATIFIED : CORPUS_V1;
+    const corpusVersion = useStratified ? CORPUS_V2_VERSION : CORPUS_VERSION;
+    const corpus = includeThin ? [...baseCorpus, ...THIN_COVERAGE_V1] : baseCorpus;
 
     const results = await Promise.all(corpus.map(async (item) => {
       try {
@@ -74,6 +82,7 @@ export default async function (req) {
             : (ver.validity !== 'valid' || ver.trust < WEAK_THRESHOLD);
         return {
           id: item.id, text: item.text, class: item.class, ground_truth: item.ground_truth,
+          ...(item.risk_tier ? { risk_tier: item.risk_tier } : {}),
           sources: item.sources || [], notes: item.notes,
           verdict: ver.validity, trust: ver.trust, support_ratio: ver.supportRatio,
           per_claim_confidences: (ver.claims || []).map((c) => c.confidence),
@@ -86,6 +95,7 @@ export default async function (req) {
       } catch (e) {
         return {
           id: item.id, text: item.text, class: item.class, ground_truth: item.ground_truth,
+          ...(item.risk_tier ? { risk_tier: item.risk_tier } : {}),
           sources: item.sources || [], notes: item.notes,
           verdict: 'invalid', trust: 0, support_ratio: 0, per_claim_confidences: [],
           grounding: null, falsification: null, cross_firm_verified: false, red_team: null,
@@ -145,7 +155,7 @@ export default async function (req) {
     const trueGrounded = trueClaims.filter((c) => c.grounding && c.grounding.grounded).length;
 
     const rec = await svc.entities.CorrelationAudit.create({
-      dataset: `${gate}${grounded ? '-grounded' : ''}-${CORPUS_VERSION}`,
+      dataset: `${gate}${grounded ? '-grounded' : ''}-${corpusVersion}`,
       n_items: results.length, n_true: trueItems.length, n_hallucinated: falseItems.length,
       pearson_r: Number(r.toFixed(4)), spearman_rho: 0, auc: Number(a.toFixed(4)),
       accuracy: Number(accuracy.toFixed(4)), threshold: WEAK_THRESHOLD,

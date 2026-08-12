@@ -35,6 +35,15 @@ export const EXTRACTION_RECALL_MIN = 0.80;
 // forever — regenerate from a fresh run to renew.
 const GENERAL_CARD_TTL_DAYS = 90;
 
+// Minimum TRUE-claim count for a tier's false-block rate to resolve its own
+// threshold: with n claims the finest non-zero rate is 1/n, so n must be at
+// least 1/threshold. Ungated tiers have no threshold to resolve, so any n does.
+export function minSamplesFor(tier) {
+  if (tier === 'critical') return Math.ceil(1 / FALSE_BLOCK_CRITICAL_MAX);
+  if (tier === 'high') return Math.ceil(1 / FALSE_BLOCK_HIGH_MAX);
+  return 1;
+}
+
 function isMeasured(value) {
   return typeof value === 'number' && Number.isFinite(value);
 }
@@ -173,6 +182,12 @@ export async function generateCardData(svc) {
   let negatives = [];
   let trues = [];
   let thins = [];
+  // Per-tier rates, and the notes explaining any tier that stays null.
+  let falsePassByRisk = byRisk(null);
+  let falseBlockByRisk = byRisk(null);
+  const tierNotes = [];
+  let stratified = false;
+
   if (negRun) {
     negatives = negRun.items.filter((i) => i.class === 'FABRICATED' || i.class === 'CORRUPTED');
     trues = negRun.items.filter((i) => i.class === 'TRUE');
@@ -182,12 +197,49 @@ export async function generateCardData(svc) {
     // (false block). Measurement gaps make the card worse, never better.
     if (negatives.length > 0) falsePass = Number((negatives.filter((i) => i.caught !== true).length / negatives.length).toFixed(4));
     if (trues.length > 0) falseBlock = Number((trues.filter((i) => i.caught !== true).length / trues.length).toFixed(4));
+
+    // A run is STRATIFIED when its items carry risk_tier. Then each tier is
+    // measured on its OWN claims instead of receiving the suite-wide aggregate.
+    // The old behaviour stamped one number into all four slots, which meant the
+    // critical threshold was judged on a population that contained no critical
+    // claims at all.
+    stratified = negRun.items.some((i) => typeof ((i || {}).risk_tier) === 'string');
+    if (stratified) {
+      for (const tier of RISK_TIERS) {
+        const inTier = negRun.items.filter((i) => (i || {}).risk_tier === tier);
+        const tTrue = inTier.filter((i) => i.class === 'TRUE');
+        const tNeg = inTier.filter((i) => i.class === 'FABRICATED' || i.class === 'CORRUPTED');
+        const minN = minSamplesFor(tier);
+
+        // THE RESOLUTION RULE. With n TRUE claims the finest non-zero rate is
+        // 1/n, so a tier whose threshold is finer than that cannot be tested:
+        // it can only read 0.0 or 1/n — unlock or fail — and both are artifacts
+        // of sample size, not capability. Such a tier publishes null, and the
+        // gate then treats it as NOT MEASURED and stays locked.
+        if (tTrue.length >= minN && tTrue.length > 0) {
+          falseBlockByRisk[tier] = Number((tTrue.filter((i) => i.caught !== true).length / tTrue.length).toFixed(4));
+        } else if (tTrue.length > 0) {
+          tierNotes.push(`false_block ${tier}: null — n=${tTrue.length} TRUE claims cannot resolve the tier threshold (needs n>=${minN}; the finest measurable non-zero rate at n=${tTrue.length} is ${Number((1 / tTrue.length).toFixed(4))}).`);
+        } else {
+          tierNotes.push(`false_block ${tier}: null — no TRUE claims at this tier in the run.`);
+        }
+        if (tNeg.length > 0) {
+          falsePassByRisk[tier] = Number((tNeg.filter((i) => i.caught !== true).length / tNeg.length).toFixed(4));
+        }
+      }
+    } else {
+      falsePassByRisk = byRisk(falsePass);
+      falseBlockByRisk = byRisk(falseBlock);
+    }
   }
 
   const generalLimitations = negRun
     ? [
       `Measured on the internal negative-control suite only (${negRun.dataset || 'negative-control run'}, n=${negRun.items.length}: ${negatives.length} fabricated/corrupted · ${trues.length} true · ${thins.length} thin-coverage) — not an independent benchmark.`,
-      'The suite is not risk-stratified: every by-risk value is the single suite-wide aggregate stated per tier, not a per-tier measurement.',
+      stratified
+        ? `Risk-stratified: each tier's rates are measured on that tier's own claims. A tier publishes a false-block rate only when its TRUE-claim count can resolve that tier's threshold (critical needs n>=${minSamplesFor('critical')}, high n>=${minSamplesFor('high')}); otherwise it is null and the gate treats it as not measured.`
+        : 'The suite is not risk-stratified: every by-risk value is the single suite-wide aggregate stated per tier, not a per-tier measurement.',
+      ...tierNotes,
       'False-pass proxy = fabricated/corrupted claims the pipeline passed; false-block proxy = true claims it failed. Thin-coverage abstention probes are excluded from both.',
       extractionLimitation,
       'evidence_alignment_rate and citation_integrity_rate have no measurement — null, never estimated.',
@@ -217,8 +269,8 @@ export async function generateCardData(svc) {
     ],
     known_limitations: generalLimitations,
     benchmark_refs: negRun ? [negRun.id, EXTRACTION_GOLD_VERSION] : [EXTRACTION_GOLD_VERSION],
-    false_pass_rate_by_risk: byRisk(falsePass),
-    false_block_rate_by_risk: byRisk(falseBlock),
+    false_pass_rate_by_risk: falsePassByRisk,
+    false_block_rate_by_risk: falseBlockByRisk,
     extraction_recall: extraction.recall,
     evidence_alignment_rate: null,
     citation_integrity_rate: null,
