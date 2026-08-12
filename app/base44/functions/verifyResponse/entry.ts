@@ -5,6 +5,7 @@ import { callLLMJson } from '../../shared/llmRouter.js';
 import { PIPELINE_VERSION, textReuseKey, lookupVerdict, storeVerdict, recordHit } from '../../shared/verdictReuse.js';
 import { buildWarrantV2Payload, signWarrantV2, sha256Hex } from '../../shared/canonicalSign.js';
 import { getActiveMode } from '../../shared/serviceMode.js';
+import { normalizeClaims, premisesFrom } from '../../shared/claimShape.js';
 
 // verifyResponse — the fast verification endpoint behind the Aether widget and
 // browser extension. Accepts an AI-generated text and runs a single fast
@@ -59,26 +60,6 @@ async function verifyWithOwnKey(prompt, userKey, orModel) {
   const fence = content.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) content = fence[1].trim();
   return JSON.parse(content);
-}
-
-// Warrant.premises is a string[] — the model can hand back a claim whose
-// `claim` field is an object, a number, or missing, and piping that straight
-// into the entity 500s the whole verification ("Input should be a valid
-// string"). Coerce to text and drop what cannot be represented: a warrant
-// listing one fewer premise is honest; a failed verification over a shape
-// quirk is not. Objects are JSON-encoded rather than dropped so the premise
-// survives in a readable form.
-function toPremiseStrings(claims) {
-  return (Array.isArray(claims) ? claims : [])
-    .map((c) => {
-      const raw = c && typeof c === 'object' ? c.claim : c;
-      if (typeof raw === 'string') return raw.trim();
-      if (raw === null || raw === undefined) return '';
-      if (typeof raw === 'object') { try { return JSON.stringify(raw); } catch { return ''; } }
-      return String(raw);
-    })
-    .filter((s) => s !== '')
-    .slice(0, 20);
 }
 
 export default async function (req) {
@@ -215,7 +196,10 @@ Respond as a single JSON object.`;
       v = await callLLMJson(svc, { prompt, schema: VERIFY_SCHEMA, orModel: 'openai/gpt-4o-mini', b44Model: 'gpt_5_mini' });
     }
     const asArray = (x) => (Array.isArray(x) ? x : []);
-    const claims = asArray(v.claims);
+    // Coerce model output at the boundary: VERIFY_SCHEMA asks for string claim
+    // text, but a schema request is not a guarantee — a non-string claim used
+    // to reach Warrant.premises and 500 the request (probe E1, 2026-08-12).
+    const claims = normalizeClaims(v.claims);
     const corrections = [...asArray(v.corrections)];
     const flags: string[] = [];
     let trust_score = num(v.trust_score);
@@ -313,7 +297,7 @@ Respond as a single JSON object.`;
       metrics: { support_ratio: claims.length ? claims.filter((c) => c.supported).length / claims.length : 0 },
       trust_score, stakes_level: 'medium',
     });
-    const premises = toPremiseStrings(claims);
+    const premises = premisesFrom(claims);
     const conclusion = (v.summary || text.slice(0, 500));
     const warrant = await svc.entities.Warrant.create({
       answer_version_id: av.id,
