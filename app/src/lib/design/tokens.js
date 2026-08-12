@@ -249,7 +249,42 @@ export const STATE_ALIASES = {
   locked: 'blocked',
   restricted: 'blocked',
   access_controlled: 'blocked',
+
+  // ——— THE REAL BACKEND VOCABULARIES (added 2026-08-12 after a live defect) ———
+  // Every term below is emitted by shipped code. Each was previously UNMAPPED,
+  // and an unmapped value falls to 'unknown' — whose label is "Not yet
+  // measured". That silently rewrote "the tribunal checked and said no" into
+  // "nobody checked": a lie, and a lie in the reassuring direction, which is
+  // the exact failure this product exists to prevent. Caught by the /live
+  // build when `rejected` rendered as unmeasured.
+  //
+  // Verdict enum — verifyResponse / streamVerify / batchVerify:
+  rejected: 'unsupported',
+  // Warrant.validity_status — attest.js and every warrant writer:
+  valid: 'supported',
+  weak: 'qualified',
+  invalid: 'unsupported',
+  // ClaimVerdict — the §8.1 decision resolver (shared/decisionResolver.js):
+  verified_for_stated_use: 'supported',
+  not_supported: 'unsupported',
+  needs_review: 'contested',
+  // Gate decisions — githubPrVerify:
+  passed: 'supported',
+  requires_review: 'contested',
+  warned: 'qualified',
 };
+
+/**
+ * True when `raw` maps to a state we actually understand. Use it before
+ * trusting a normalizeState() result: 'unknown' is honest for "not measured",
+ * but for an unrecognised vocabulary term it is a false reassurance. Render
+ * the raw value alongside the badge when this returns false.
+ */
+export function isMappedState(raw) {
+  if (raw == null || String(raw).trim() === '') return false;
+  const k = String(raw).trim().toLowerCase().replace(/[\s-]+/g, '_');
+  return Boolean(EPISTEMIC[k] || STATE_ALIASES[k]);
+}
 
 /** Normalise any incoming string to a canonical state key. Unrecognised → 'unknown'. */
 export function normalizeState(raw) {
