@@ -4,6 +4,7 @@
 // and Base44 InvokeLLM is the last-resort fallback.
 
 import { secrets } from 'base44:runtime';
+import { extractJsonObject } from './jsonExtract.js';
 
 const ENDPOINT = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -77,9 +78,15 @@ function fallbackShape(content, reason) {
   };
 }
 
-async function rawCall(prompt, modelId, userKey) {
+async function rawCall(prompt, modelId, userKey, opts = {}) {
   const key = userKey || secrets.get('ANTHROPIC_API_KEY');
   if (!key) throw new Error('ANTHROPIC_API_KEY not set');
+  // NOTE: assistant-turn prefill ('{' to force JSON-first output) is NOT usable
+  // here — this model family rejects it outright: "400 invalid_request_error:
+  // This model does not support assistant message prefill. The conversation
+  // must end with a user message." Robustness therefore lives entirely in
+  // extractJsonObject, which tolerates preamble, fences, and trailing prose.
+  const messages = [{ role: 'user', content: prompt + '\n\nRespond with a single JSON object only — no prose, no markdown fences.' }];
   const res = await fetch(ENDPOINT, {
     method: 'POST',
     headers: {
@@ -96,7 +103,7 @@ async function rawCall(prompt, modelId, userKey) {
     body: JSON.stringify({
       model: modelId,
       max_tokens: MAX_TOKENS,
-      messages: [{ role: 'user', content: prompt + '\n\nRespond with a single JSON object only — no prose, no markdown fences.' }],
+      messages,
     }),
   });
   if (!res.ok) {
@@ -104,20 +111,37 @@ async function rawCall(prompt, modelId, userKey) {
     throw new Error('Anthropic ' + res.status + ': ' + errText.slice(0, 200));
   }
   const data = await res.json();
-  const content = data?.content?.[0]?.text || '';
-  return stripFences(content);
+  // Read EVERY text block, not just content[0]. The response content array can
+  // lead with a non-text block (e.g. a thinking block), in which case
+  // `content[0].text` is undefined and the whole reply reads as empty — that is
+  // exactly what produced the remaining "Anthropic returned non-JSON:" failures
+  // (note the empty excerpt after the colon) on 11 of 30 gate-0 items.
+  const blocks = Array.isArray(data?.content) ? data.content : [];
+  const content = blocks
+    .filter((b) => b && b.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text)
+    .join('\n')
+    .trim();
+  // JSON callers get the raw text — extractJsonObject unwraps fences itself and
+  // also handles the preamble that stripFences cannot.
+  return opts.rawText ? content : stripFences(content);
 }
 
 // Raw JSON caller — returns the parsed JSON object as-is (used by the tribunal
-// verifier whose schema is NOT the warranted-answer shape). Throws on non-JSON.
+// verifier whose schema is NOT the warranted-answer shape).
+//
+// After the 2026-08-12 gate-0 run lost 18 of 30 items to "Anthropic returned
+// non-JSON", parsing goes through extractJsonObject, which tolerates preamble,
+// fences, and trailing text. The model was answering correctly; only the parser
+// was failing. (Assistant-turn prefill was tried and rejected by the model —
+// see rawCall.)
 export async function callAnthropicJson(prompt, modelValue, userKey) {
   const modelId = CLAUDE_MODEL_MAP[modelValue] || DEFAULT_MODEL;
-  const cleaned = await rawCall(prompt, modelId, userKey);
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    throw new Error('Anthropic returned non-JSON');
-  }
+  const cleaned = await rawCall(prompt, modelId, userKey, { rawText: true });
+  const parsed = extractJsonObject(cleaned);
+  if (parsed) return parsed;
+  // Keep a short excerpt: "returned non-JSON" with no sample is undebuggable.
+  throw new Error('Anthropic returned non-JSON: ' + String(cleaned).slice(0, 160));
 }
 
 // Warranted-answer shape caller — mirrors callOpenRouter's normalization so
