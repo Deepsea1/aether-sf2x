@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { secrets } from 'base44:runtime';
 import { requireAdmin } from '../../shared/auth.js';
 import { verifySignature, signatureScheme } from '../../shared/sf2xCore.js';
+import { exposeTruthDecision, modelAssessedDecision } from '../../shared/truthContract.js';
 
 // Enterprise audit evidence pack. Admin-only. Assembles the complete, auditable
 // decision record for a warrant or inquiry: inquiry, answer version (full text),
@@ -48,6 +49,11 @@ export default async function (req) {
 
     const avId = av?.id || null;
     const inqId = inquiry?.id || av?.inquiry_id || null;
+    const truthDecision = av?.cognitive_state?.truth_decision || modelAssessedDecision({
+      policyId: 'evidence-pack-model-assessment',
+      policyVersion: '1',
+      missingEvidence: ['The answer version has no independently evaluated factual decision.'],
+    });
 
     const debates = inqId ? await svc.entities.Debate.filter({ inquiry_id: inqId }, '-created_date', 20) : [];
     const reviews = avId ? await svc.entities.Review.filter({ answer_version_id: avId }, '-created_date', 20) : [];
@@ -76,6 +82,7 @@ export default async function (req) {
       answer_version: av ? {
         id: av.id, version: av.version, answer_text: av.answer_text, trust_score: av.trust_score,
         metrics: av.metrics, stakes_level: av.stakes_level, created_date: av.created_date,
+        ...exposeTruthDecision(truthDecision),
       } : null,
       warrant: warrant ? {
         id: warrant.id, validity_status: warrant.validity_status, confidence_score: warrant.confidence_score,
@@ -100,7 +107,7 @@ export default async function (req) {
       evidence_snapshots: warrant?.source_snapshots || [],
     };
 
-    return Response.json({ pack });
+    return Response.json({ pack, ...exposeTruthDecision(truthDecision) });
   } catch (error) {
     console.error('generateEvidencePack error', error);
     return Response.json({ error: error.message }, { status: 500 });

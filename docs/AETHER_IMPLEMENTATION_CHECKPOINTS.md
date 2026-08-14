@@ -62,6 +62,8 @@ factual state.
 `revalidateWarrant` retains the factual decision while a changed source makes
 the attested evidence unavailable and removes action authorization; it does not
 rewrite factual status from a model re-check.
+The admin `generateEvidencePack` artifact includes and returns the versioned
+truth decision, so a review bundle cannot reduce it to a score or signature.
 
 Local deterministic evidence for the current contract slice:
 
