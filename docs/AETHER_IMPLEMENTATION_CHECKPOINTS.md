@@ -56,6 +56,9 @@ MCP worker, and the GitHub Action. The direct inquiry and all three tribunal
 modes persist their decision with the answer version so a cache/re-render path
 cannot silently discard the epistemic state. The batch summary is a derived,
 unsealed aggregate and explicitly reports `integrity_status: UNAVAILABLE`.
+The public `verifyAnswer` surface now reports a reconstructed valid warrant
+signature as `integrity_status: VERIFIED`, without promoting the underlying
+factual state.
 
 Local deterministic evidence for the current contract slice:
 
