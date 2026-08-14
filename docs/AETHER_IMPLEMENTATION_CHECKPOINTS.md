@@ -49,9 +49,25 @@ The contract preserves `truth_status`, `evidence_basis`, `proof_level`,
 hard rule is that a model-only assessment is `UNKNOWN + MODEL_ASSESSED + L1`;
 it cannot issue a factual `VERIFIED` result or action authorization.
 
+Current migrated response paths preserve the canonical contract alongside their
+legacy score/verdict fields: `verifyResponse`, `streamVerify`, `webhookVerify`,
+`batchVerify`, `verifyBatch`, `inquire`, `warrantApi`, the MCP worker, and the
+GitHub Action. `inquire` persists its decision with the answer version so a
+cache hit cannot silently discard the epistemic state. The batch summary is a
+derived, unsealed aggregate and explicitly reports `integrity_status: UNAVAILABLE`.
+
+Local deterministic evidence for the current contract slice:
+
+| Surface | Result | Evidence |
+|---|---|---|
+| Base44 shared modules | PASS | `node --test app/base44/shared/tests/*.test.mjs`: 153/153 |
+| GitHub Action gate | PASS | `node --test github-action/gate.test.mjs`: 42/42 |
+| MCP worker after contract propagation | PASS | `node --test mcp-worker/src/*.test.js`: 214/214 |
+
 ## Next smallest safe task
 
-Map and migrate every factual-serving response path to expose the canonical
-contract alongside legacy fields, starting with `verifyResponse`. Do not remove
-legacy fields until the Base44 app, MCP worker, SDK, GitHub Action, browser
-extension, batch, webhook, and tribunal consumers have contract tests.
+Audit and migrate the tribunal-specific response paths and their persisted
+warrants. Then add SDK and browser-extension consumer tests/labels before
+considering any legacy-field removal. Base44 app build, lint, typecheck, and
+staging/live gates remain open; no deployment or production verification has
+occurred.

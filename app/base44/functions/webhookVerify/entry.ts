@@ -89,9 +89,9 @@ export default async function (req) {
     // getActiveMode itself degrades to { mode: 'normal', mode_read_error: true }
     // on a read failure; the try/catch only guards an unexpected module throw
     // (same wrapped-never-fatal idiom as the v2 signing block below). The stamp
-    // rides every HTTP response (the webhook delivery body is unchanged —
-    // additive fields there would alter the documented webhook contract) and
-    // warrants record the mode at issuance, so degradation is surfaced, never
+    // rides every HTTP response and webhook delivery payload. Canonical truth
+    // fields are additive, while warrants record the mode at issuance, so
+    // degradation is surfaced, never
     // hidden.
     let serviceMode = { mode: 'normal' };
     try { serviceMode = await getActiveMode(svc); } catch (e) { serviceMode = { mode: 'normal', mode_read_error: true }; }

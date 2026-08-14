@@ -103,7 +103,7 @@ Respond as a single JSON object.`;
     const rejected = scored.filter((r) => r.verdict === 'rejected').length;
     const average_trust_score = scored.length ? Math.round(scored.reduce((s, r) => s + r.trust_score, 0) / scored.length) : 0;
     const batch_verdict = average_trust_score >= 75 ? 'verified' : average_trust_score >= 50 ? 'contested' : 'rejected';
-    return Response.json({ results, summary: { total: results.length, verified, contested, rejected, average_trust_score, batch_verdict, truth_status: 'UNKNOWN', evidence_basis: 'MODEL_ASSESSED', proof_level: 'L1', action_authorization: 'NOT_AUTHORIZED' } });
+    return Response.json({ results, summary: { total: results.length, verified, contested, rejected, average_trust_score, batch_verdict, truth_status: 'UNKNOWN', evidence_basis: 'MODEL_ASSESSED', proof_level: 'L1', integrity_status: 'UNAVAILABLE', action_authorization: 'NOT_AUTHORIZED' } });
   } catch (error) {
     console.error('batchVerify error', error);
     return Response.json({ error: error.message || 'batch failed' }, { status: 500 });

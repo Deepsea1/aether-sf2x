@@ -6,6 +6,7 @@ import { buildWarrantV2Payload, signWarrantV2, sha256Hex } from '../../shared/ca
 import { emitTelemetry, newTraceId } from '../../shared/telemetry.js';
 import { runRedTeamAttack } from '../../shared/redTeam.js';
 import { callLLMJson, checkLlmBudget } from '../../shared/llmRouter.js';
+import { exposeTruthDecision, modelAssessedDecision } from '../../shared/truthContract.js';
 
 const VALID_DOMAINS = ['General', 'Medicine', 'Finance', 'Legal', 'Engineering', 'Science'];
 const VALID_STAKES = ['low', 'medium', 'high', 'critical'];
@@ -73,6 +74,11 @@ export default async function(req) {
           if (ageMs < 7 * 86400000) {
             let cachedWarrant = null;
             if (av0.warrant_id) cachedWarrant = await svc.entities.Warrant.get(av0.warrant_id).catch(() => null);
+            const truthDecision = av0.cognitive_state?.truth_decision || modelAssessedDecision({
+              policyId: 'inquire-model-assessment',
+              policyVersion: '1',
+              missingEvidence: ['The cached inquiry has no independently evaluated evidence decision.'],
+            });
             return Response.json({
               inquiry_id: hits[0].id, answer_version_id: av0.id, version: av0.version,
               answer: av0.answer_text,
@@ -81,6 +87,7 @@ export default async function(req) {
               cached: true,
               certified: !!(av0.cognitive_state?.certified), certification: av0.cognitive_state?.certified ? 'certified' : 'uncertified',
               verification_url: `${origin}/verify/${av0.id}`, badge_url: `${origin}/badge/${av0.id}`, embed_url: `${origin}/embed/badge/${av0.id}`,
+              ...exposeTruthDecision(truthDecision),
             });
           }
         }
@@ -163,11 +170,16 @@ export default async function(req) {
     const version = existing.length + 1;
 
     const w = r.warrant || {};
+    const truthDecision = modelAssessedDecision({
+      policyId: 'inquire-model-assessment',
+      policyVersion: '1',
+      missingEvidence: ['The inquiry pipeline has not completed an independent evidence evaluation.'],
+    });
     const av = await svc.entities.AnswerVersion.create({
       inquiry_id: inquiry.id,
       version,
       answer_text: r.answer || '',
-      cognitive_state: { ...(r.cognitive_state || {}), model, source: 'api' },
+      cognitive_state: { ...(r.cognitive_state || {}), model, source: 'api', truth_decision: truthDecision },
       metrics: r.metrics || {},
       trust_score: computeTrustworthyRate(r.metrics, w),
       stakes_level: stakes,
@@ -213,7 +225,7 @@ export default async function(req) {
     const certified = !!redTeam.run && redTeam.outcome !== 'error' && redTeam.outcome !== 'broken';
     await svc.entities.AnswerVersion.update(av.id, {
       warrant_id: warrant.id,
-      cognitive_state: { ...(r.cognitive_state || {}), model, source: 'api', certified, red_team_run_id: redTeam.run?.id || null, red_team_outcome: redTeam.outcome, red_team_severity: redTeam.severity },
+      cognitive_state: { ...(r.cognitive_state || {}), model, source: 'api', truth_decision: truthDecision, certified, red_team_run_id: redTeam.run?.id || null, red_team_outcome: redTeam.outcome, red_team_severity: redTeam.severity },
     }).catch(() => {});
 
     await emitTelemetry(svc, {
@@ -258,6 +270,7 @@ export default async function(req) {
       certified, certification: certified ? 'certified' : 'uncertified',
       red_team: { outcome: redTeam.outcome, severity: redTeam.severity, run_id: redTeam.run?.id || null },
       byok: !!ownKey,
+      ...exposeTruthDecision(truthDecision),
     });
   } catch (error) {
     console.error('inquire error', error);
