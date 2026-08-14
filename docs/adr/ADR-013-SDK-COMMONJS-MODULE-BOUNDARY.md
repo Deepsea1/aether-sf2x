@@ -1,8 +1,8 @@
 # ADR-013: JavaScript SDK CommonJS module boundary
 
-**Status:** accepted  
-**Date:** 2026-08-13  
-**Decision owner:** Aether platform  
+**Status:** accepted
+**Date:** 2026-08-13
+**Decision owner:** Aether platform
 **Required reviewers:** SDK/API compatibility and release review
 
 ## Context

@@ -1,7 +1,7 @@
 # Aether Audit — Phase 0 Baseline
 
-**Baseline commit:** `d4f996bc4ffaab6750cd71a2ddcaab199367811c`  
-**Environment:** local Windows desktop checkout  
+**Baseline commit:** `d4f996bc4ffaab6750cd71a2ddcaab199367811c`
+**Environment:** local Windows desktop checkout
 **Scope:** deterministic repository checks only; no authenticated staging or
 production claim is made.
 

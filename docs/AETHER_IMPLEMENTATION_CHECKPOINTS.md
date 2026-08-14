@@ -5,8 +5,9 @@
 **Status:** COMPLETE (documentation transfer only)
 
 - Canonical plan: `AETHER_NUMBER_ONE_TRUTH_LAYER_BUILD_PLAN.md`
-- SHA-256: `f1b1278a3089bbf4593f6d36696cd99b48c37899c7f53d4240e666323e2f2582`
-- Source was a user-supplied canonical document; its hash matches this copy.
+- Source SHA-256 at import: `f1b1278a3089bbf4593f6d36696cd99b48c37899c7f53d4240e666323e2f2582`
+- Source was a user-supplied canonical document. The committed Markdown differs
+  only by removal of trailing whitespace so it passes repository diff checks.
 
 ## CP-001 — audited baseline reproduced
 

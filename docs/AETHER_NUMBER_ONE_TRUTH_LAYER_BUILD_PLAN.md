@@ -1,13 +1,13 @@
 # Aether Number-One Truth Layer
 ## Master Build Plan, Constitution, Architecture, Red-Team, Audit, Roadmap, and Codex Handoff
 
-**Repository:** `Deepsea1/aether-sf2x`  
-**Audited baseline:** `d4f996bc4ffaab6750cd71a2ddcaab199367811c`  
-**Plan version:** 1.0  
-**Plan date:** 2026-08-13  
-**Status:** Architecture and implementation plan; not a claim that all work is deployed  
-**Primary product:** Aether  
-**Relationship:** Aether is an independent truth authority integrated throughout SF2X  
+**Repository:** `Deepsea1/aether-sf2x`
+**Audited baseline:** `d4f996bc4ffaab6750cd71a2ddcaab199367811c`
+**Plan version:** 1.0
+**Plan date:** 2026-08-13
+**Status:** Architecture and implementation plan; not a claim that all work is deployed
+**Primary product:** Aether
+**Relationship:** Aether is an independent truth authority integrated throughout SF2X
 **Core rule:** Unknown is a valid and often correct outcome
 
 ---
@@ -78,11 +78,11 @@ Use:
 
 Do not use:
 
-> Aether proves truth.  
-> Aether catches every lie.  
-> Aether is always accurate.  
-> Aether’s signature proves a fact is true.  
-> More models means more truth.  
+> Aether proves truth.
+> Aether catches every lie.
+> Aether is always accurate.
+> Aether’s signature proves a fact is true.
+> More models means more truth.
 > Aether can verify anything.
 
 ---
@@ -122,7 +122,7 @@ applicable conditions are demonstrated with retained evidence:
 
 ## 4.1 Audited repository baseline
 
-**Target:** `Deepsea1/aether-sf2x@d4f996bc4ffaab6750cd71a2ddcaab199367811c`  
+**Target:** `Deepsea1/aether-sf2x@d4f996bc4ffaab6750cd71a2ddcaab199367811c`
 **Audit mode:** Read-only; no production changes claimed
 
 | Check | Result | Scope |
