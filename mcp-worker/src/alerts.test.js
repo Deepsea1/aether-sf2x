@@ -33,6 +33,11 @@ import {
 const VERIFY_RESPONSE = {
   trust_score: 40,
   verdict: 'contested',
+  truth_status: 'UNKNOWN',
+  evidence_basis: 'MODEL_ASSESSED',
+  proof_level: 'L1',
+  integrity_status: 'UNSEALED',
+  action_authorization: 'NOT_AUTHORIZED',
   corrections: ['Cite the specific employer and provide the exact text or link to Section 4.1'],
   claims: [
     { claim: 'According to Section 4.1, employees get 15 vacation days.', supported: false, notes: 'No source or employer is cited.' },
@@ -73,6 +78,10 @@ describe('normalizeVerification — one model from three shapes', () => {
     const v = normalizeVerification(VERIFY_RESPONSE);
     assert.equal(v.trustScore, 40);
     assert.equal(v.verdict, 'contested');
+    assert.equal(v.truthStatus, 'UNKNOWN');
+    assert.equal(v.evidenceBasis, 'MODEL_ASSESSED');
+    assert.equal(v.proofLevel, 'L1');
+    assert.equal(v.actionAuthorization, 'NOT_AUTHORIZED');
     assert.equal(v.claims.length, 2);
     assert.equal(v.corrections.length, 1);
     assert.equal(v.warrantId, '6a6de04b26cf84c8aa37847f');

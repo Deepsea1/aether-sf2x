@@ -141,11 +141,21 @@ async function callVerifyClaim(args, env) {
 
   // warrantApi returns: { warrant_id, lineage_id, ...warrant fields, certified, certification, red_team }
   const verification_id = data.lineage_id || data.warrant_id;
+  const upstreamDecision = data.truth_decision && typeof data.truth_decision === 'object' ? data.truth_decision : null;
+  const truthState = {
+    truth_decision: upstreamDecision,
+    truth_status: data.truth_status || upstreamDecision?.truth_status || 'UNKNOWN',
+    evidence_basis: data.evidence_basis || upstreamDecision?.evidence_basis || 'UNEXAMINED',
+    proof_level: data.proof_level || upstreamDecision?.proof_level || 'L0',
+    integrity_status: data.integrity_status || upstreamDecision?.integrity_status || 'UNAVAILABLE',
+    action_authorization: data.action_authorization || upstreamDecision?.action_authorization || 'NOT_AUTHORIZED',
+  };
   const record = {
     verification_id,
     warrant_id: data.warrant_id || null,
     verdict: data.verdict || (data.trust_score >= 75 ? 'verified' : data.trust_score >= 50 ? 'contested' : 'rejected'),
     trust_score: data.trust_score,
+    ...truthState,
     certified: !!data.certified,
     certification: data.certification || (data.certified ? 'certified' : 'uncertified'),
     signed_hash: data.signed_hash || null,
@@ -167,6 +177,7 @@ async function callVerifyClaim(args, env) {
     warrant_id: record.warrant_id,
     verdict: record.verdict,
     trust_score: record.trust_score,
+    ...truthState,
     certified: record.certified,
     certification: record.certification,
     warrant_signed: !!record.signed_hash,
@@ -185,6 +196,12 @@ async function callExplainVerdict(args, env) {
     warrant_id: record.warrant_id,
     verdict: record.verdict,
     trust_score: record.trust_score,
+    truth_decision: record.truth_decision || null,
+    truth_status: record.truth_status || 'UNKNOWN',
+    evidence_basis: record.evidence_basis || 'UNEXAMINED',
+    proof_level: record.proof_level || 'L0',
+    integrity_status: record.integrity_status || 'UNAVAILABLE',
+    action_authorization: record.action_authorization || 'NOT_AUTHORIZED',
     certified: record.certified,
     certification: record.certification,
     created_at: record.created_at,
@@ -203,6 +220,12 @@ async function callGetWarrant(args, env) {
     warrant_id: record.warrant_id,
     verdict: record.verdict,
     trust_score: record.trust_score,
+    truth_decision: record.truth_decision || null,
+    truth_status: record.truth_status || 'UNKNOWN',
+    evidence_basis: record.evidence_basis || 'UNEXAMINED',
+    proof_level: record.proof_level || 'L0',
+    integrity_status: record.integrity_status || 'UNAVAILABLE',
+    action_authorization: record.action_authorization || 'NOT_AUTHORIZED',
     signed_hash: record.signed_hash,
     premises: record.premises,
     sources: record.sources,
