@@ -219,6 +219,16 @@ describe('v2: dispositions present — advisory (the default)', () => {
 });
 
 describe('v2: dispositions absent — the legacy threshold rule, unchanged', () => {
+  test('explicit model-only truth state fails enforcing and warns advisory, regardless of score', () => {
+    const result = { trust_score: 99, verdict: 'verified', truth_status: 'UNKNOWN', evidence_basis: 'MODEL_ASSESSED', proof_level: 'L1' };
+    const enforcing = evaluateGateV2(result, { mode: 'enforcing', threshold: 80 });
+    assert.equal(enforcing.failed, true);
+    assert.match(enforcing.message, /model-assessed/i);
+    const advisory = evaluateGateV2(result, { mode: 'advisory', threshold: 80 });
+    assert.equal(advisory.failed, false);
+    assert.equal(advisory.level, 'warning');
+  });
+
   test('enforcing reproduces evaluateGate exactly on a below-threshold response', () => {
     const legacy = { trust_score: 40, verdict: 'contested', corrections: ['a', 'b'] };
     const v1 = evaluateGate({ trustScore: 40, verdict: 'contested', threshold: 80, correctionCount: 2 });

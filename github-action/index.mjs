@@ -180,6 +180,11 @@ async function run() {
       diff_line: c?.diff_line ?? null,
       text: clip(c?.text, 200),
     }))));
+    setOutput('truth-status', typeof result.truth_status === 'string' ? result.truth_status : 'UNKNOWN');
+    setOutput('evidence-basis', typeof result.evidence_basis === 'string' ? result.evidence_basis : 'UNEXAMINED');
+    setOutput('proof-level', typeof result.proof_level === 'string' ? result.proof_level : 'L0');
+    setOutput('integrity-status', typeof result.integrity_status === 'string' ? result.integrity_status : 'UNAVAILABLE');
+    setOutput('action-authorization', typeof result.action_authorization === 'string' ? result.action_authorization : 'NOT_AUTHORIZED');
 
     info('\n🛡️ Aether Verification Results:');
 
@@ -211,6 +216,7 @@ async function run() {
     } else {
       info(`   Trust Score: ${trustScore}/100`);
       info(`   Verdict: ${verdict}`);
+      info(`   Truth state: ${result.truth_status || 'UNKNOWN'} · ${result.evidence_basis || 'UNEXAMINED'} · ${result.proof_level || 'L0'}`);
 
       if (corrections.length > 0) {
         info(`   Corrections (${corrections.length}):`);
