@@ -51,10 +51,11 @@ it cannot issue a factual `VERIFIED` result or action authorization.
 
 Current migrated response paths preserve the canonical contract alongside their
 legacy score/verdict fields: `verifyResponse`, `streamVerify`, `webhookVerify`,
-`batchVerify`, `verifyBatch`, `inquire`, `warrantApi`, the MCP worker, and the
-GitHub Action. `inquire` persists its decision with the answer version so a
-cache hit cannot silently discard the epistemic state. The batch summary is a
-derived, unsealed aggregate and explicitly reports `integrity_status: UNAVAILABLE`.
+`batchVerify`, `verifyBatch`, `inquire`, `warrantApi`, `inquireTribunal`, the
+MCP worker, and the GitHub Action. The direct inquiry and all three tribunal
+modes persist their decision with the answer version so a cache/re-render path
+cannot silently discard the epistemic state. The batch summary is a derived,
+unsealed aggregate and explicitly reports `integrity_status: UNAVAILABLE`.
 
 Local deterministic evidence for the current contract slice:
 
