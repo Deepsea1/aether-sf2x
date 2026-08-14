@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { resolveApiKey, checkQuota, recordUsage, planBatchCharge, CREDIT_COSTS } from '../../shared/apiAuth.js';
+import { modelAssessedDecision, exposeTruthDecision } from '../../shared/truthContract.js';
 
 // batchVerify — the public batch verification endpoint documented in
 // docs/API_REFERENCE.md ("Batch Verify": texts[] up to 50 → per-text verdicts +
@@ -85,7 +86,8 @@ Respond as a single JSON object.`;
         const trust = Math.max(0, Math.min(100, Math.round(num(v.trust_score))));
         const verdict = v.verdict || (trust >= 75 ? 'verified' : trust >= 50 ? 'contested' : 'rejected');
         const flags = Array.isArray(v.corrections) ? v.corrections : [];
-        return { index: it.index, text_preview, trust_score: trust, verdict, flags, word_count };
+        const truthDecision = modelAssessedDecision({ claim_id: `batch-${it.index}`, policy_id: 'batch-verify-model-assessment', policy_version: '1', missing_evidence: ['retrieved applicable evidence required for a final factual status'] });
+        return { index: it.index, text_preview, trust_score: trust, verdict, ...exposeTruthDecision(truthDecision), flags, word_count };
       } catch (e) {
         return { index: it.index, text_preview, word_count, error: e?.message || 'failed' };
       }
@@ -101,7 +103,7 @@ Respond as a single JSON object.`;
     const rejected = scored.filter((r) => r.verdict === 'rejected').length;
     const average_trust_score = scored.length ? Math.round(scored.reduce((s, r) => s + r.trust_score, 0) / scored.length) : 0;
     const batch_verdict = average_trust_score >= 75 ? 'verified' : average_trust_score >= 50 ? 'contested' : 'rejected';
-    return Response.json({ results, summary: { total: results.length, verified, contested, rejected, average_trust_score, batch_verdict } });
+    return Response.json({ results, summary: { total: results.length, verified, contested, rejected, average_trust_score, batch_verdict, truth_status: 'UNKNOWN', evidence_basis: 'MODEL_ASSESSED', proof_level: 'L1', action_authorization: 'NOT_AUTHORIZED' } });
   } catch (error) {
     console.error('batchVerify error', error);
     return Response.json({ error: error.message || 'batch failed' }, { status: 500 });

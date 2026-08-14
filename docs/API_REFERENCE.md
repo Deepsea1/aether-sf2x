@@ -278,6 +278,11 @@ Verify text and send results to a webhook URL (async pattern).
     "verification_id": "vrf_1234567890",
     "trust_score": 85,
     "verdict": "verified",
+    "truth_status": "UNKNOWN",
+    "evidence_basis": "MODEL_ASSESSED",
+    "proof_level": "L1",
+    "integrity_status": "UNSEALED",
+    "action_authorization": "NOT_AUTHORIZED",
     "flags": [],
     "timestamp": "2026-08-01T12:00:00.000Z"
   }

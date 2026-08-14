@@ -1,5 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { resolveApiKey, checkQuota, recordUsage, planBatchCharge, CREDIT_COSTS } from '../../shared/apiAuth.js';
+import { modelAssessedDecision, exposeTruthDecision } from '../../shared/truthContract.js';
 
 // verifyBatch — retroactive audit of existing AI transcripts/logs. Accepts up
 // to 10 texts (items[] or newline-separated csv) and runs the fast verification
@@ -48,7 +49,7 @@ export default async function (req) {
     const charge = planBatchCharge({ plan: quota.plan, remaining: quota.remaining, endpoint: 'verifyResponse', itemCount: items.length });
     if (!charge.allowed) return Response.json({ error: charge.reason, plan: quota.plan, limit: quota.limit, remaining: quota.remaining }, { status: charge.status });
 
-    const results = await Promise.all(items.map(async (it) => {
+    const results = await Promise.all(items.map(async (it, itemIndex) => {
       try {
         const prompt = `You are the Aether verification engine. Check this AI-generated text for hallucinations. Decompose into claims, judge each supported/unsupported, list corrections, render a verdict (verified/contested/rejected), and assign a calibrated trust score 0-100 (never 100).
 
@@ -62,7 +63,8 @@ Respond as a single JSON object.`;
         const trust = Math.max(0, Math.min(100, Math.round(num(v.trust_score))));
         const verdict = v.verdict || (trust >= 75 ? 'verified' : trust >= 50 ? 'contested' : 'rejected');
         const corrections = Array.isArray(v.corrections) ? v.corrections : [];
-        return { text: it.text.slice(0, 200), trust_score: trust, verdict, corrections, issues: corrections.length };
+        const truthDecision = modelAssessedDecision({ claim_id: `verify-batch-${itemIndex}`, policy_id: 'verify-batch-model-assessment', policy_version: '1', missing_evidence: ['retrieved applicable evidence required for a final factual status'] });
+        return { text: it.text.slice(0, 200), trust_score: trust, verdict, ...exposeTruthDecision(truthDecision), corrections, issues: corrections.length };
       } catch (e) {
         return { text: it.text.slice(0, 200), error: e?.message || 'failed' };
       }

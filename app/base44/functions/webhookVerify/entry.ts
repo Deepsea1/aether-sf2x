@@ -6,6 +6,7 @@ import { PIPELINE_VERSION, textReuseKey, lookupVerdict, recordHit } from '../../
 import { buildWarrantV2Payload, signWarrantV2, sha256Hex, buildPublicWarrantPayload, signPublicWarrant } from '../../shared/canonicalSign.js';
 import { getActiveMode } from '../../shared/serviceMode.js';
 import { normalizeClaims, premisesFrom } from '../../shared/claimShape.js';
+import { modelAssessedDecision, exposeTruthDecision } from '../../shared/truthContract.js';
 
 // webhookVerify — the async webhook verification endpoint documented in
 // docs/API_REFERENCE.md ("Webhook Verification": one text → tribunal verdict →
@@ -109,7 +110,8 @@ export default async function (req) {
       if (hit && hit.payload && Number.isFinite(Number(hit.payload.trust_score)) && typeof hit.payload.verdict === 'string') {
         await recordHit(svc, hit);
         const verification_id = String(body.verification_id || '').trim() || `vrf_${crypto.randomUUID()}`;
-        const verification = { verification_id, trust_score: hit.payload.trust_score, verdict: hit.payload.verdict, flags: Array.isArray(hit.payload.flags) ? hit.payload.flags : [], timestamp: new Date().toISOString() };
+        const truthDecision = hit.payload.truth_decision || modelAssessedDecision({ claim_id: hit.payload.lineage_id || hit.payload.warrant_id || verification_id, policy_id: 'webhook-verify-model-assessment', policy_version: '1', missing_evidence: ['retrieved applicable evidence required for a final factual status'] });
+        const verification = { verification_id, trust_score: hit.payload.trust_score, verdict: hit.payload.verdict, ...exposeTruthDecision(truthDecision), flags: Array.isArray(hit.payload.flags) ? hit.payload.flags : [], timestamp: new Date().toISOString() };
         const sent = await guardedPost(
           webhookUrl,
           { 'Content-Type': 'application/json', 'x-aether-event': 'verification.complete' },
@@ -251,6 +253,7 @@ Respond as a single JSON object.`;
       metrics: { support_ratio: claims.length ? claimsOut.filter((c) => c.supported).length / claims.length : 0 },
       trust_score, stakes_level: 'medium',
     });
+    const truthDecision = modelAssessedDecision({ claim_id: av.id, policy_id: 'webhook-verify-model-assessment', policy_version: '1', missing_evidence: ['retrieved applicable evidence required for a final factual status'] });
     const premises = premisesFrom(claims);
     const conclusion = (v.summary || text.slice(0, 500));
     const warrant = await svc.entities.Warrant.create({
@@ -264,7 +267,7 @@ Respond as a single JSON object.`;
       service_mode_at_issuance: serviceMode.mode,
       description: `Webhook verification · ${verdict} · ${claims.length} claims · ${latency_ms}ms`,
     });
-    await svc.entities.AnswerVersion.update(av.id, { warrant_id: warrant.id }).catch(() => {});
+    await svc.entities.AnswerVersion.update(av.id, { warrant_id: warrant.id, cognitive_state: { source: 'webhook', verdict, truth_decision: truthDecision, latency_ms, claim_count: claims.length, correction_count: corrections.length, flags } }).catch(() => {});
     // Dual-sign (§9.3): additive RFC 8785 canonical v2 signature — these
     // API-path warrants previously carried no signature at all. answer_text_sha256
     // hashes the answer text AS PERSISTED on the AnswerVersion row (the
@@ -326,7 +329,7 @@ Respond as a single JSON object.`;
     await recordUsage(svc, apiKey, 'verifyResponse', CREDIT_COSTS.verifyResponse || 2, { inquiry_id: inquiry.id });
 
     const verification_id = String(body.verification_id || '').trim() || `vrf_${crypto.randomUUID()}`;
-    const verification = { verification_id, trust_score, verdict, flags, timestamp: new Date().toISOString() };
+    const verification = { verification_id, trust_score, verdict, ...exposeTruthDecision(truthDecision), flags, timestamp: new Date().toISOString() };
 
     // Deliver via the shared SSRF-guarded POST — the URL is re-validated at
     // delivery time (defense in depth vs DNS changes between check and use) and
