@@ -52,6 +52,16 @@ outputs:
     description: "The server's own gate_decision (passed, warned, requires_review, blocked) when present; empty for legacy responses"
   dispositions:
     description: 'JSON array of per-claim dispositions ({disposition, materiality, category, file_path, diff_line, text}); empty for legacy responses'
+  truth-status:
+    description: 'Canonical factual status; UNKNOWN when the server does not expose a final factual decision'
+  evidence-basis:
+    description: 'Canonical evidence basis, kept separate from score and verdict'
+  proof-level:
+    description: 'Canonical proof level (L0-L8)'
+  integrity-status:
+    description: 'Canonical decision-record integrity status'
+  action-authorization:
+    description: 'Canonical action authorization; never inferred from a factual status'
 
 runs:
   using: 'node20'

@@ -74,6 +74,11 @@ Once advisory runs show an acceptable would-have-blocked rate for your repo:
 |--------|-------------|
 | `trust-score` | Trust score 0-100 (legacy responses; `0` when dispositions are present) |
 | `verdict` | Tribunal verdict (verified, contested, rejected; `unknown` when dispositions are present) |
+| `truth-status` | Factual truth state; model-only assessments remain `UNKNOWN` |
+| `evidence-basis` | Basis for the factual truth state (for example, `MODEL_ASSESSED`) |
+| `proof-level` | Evidence proof level (`L0`–`L4`) kept separate from score and verdict |
+| `integrity-status` | Whether the returned evidence/record is intact and usable |
+| `action-authorization` | Whether an action is authorized; never inferred from the factual status alone |
 | `corrections` | JSON array of corrections |
 | `gate-decision` | The server's own `gate_decision` (passed, warned, requires_review, blocked); empty for legacy responses |
 | `dispositions` | JSON array of per-claim dispositions (`{disposition, materiality, category, file_path, diff_line, text}`); empty for legacy responses |

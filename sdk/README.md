@@ -40,7 +40,8 @@ aether = AetherClient(api_key="your-api-key")
 
 # Verify a single response
 result = aether.verify("According to Section 4.1, all employees get 15 days off.")
-print(f"Trust score: {result['trust_score']}/100 — {result['verdict']}")
+print(f"Model score: {result['trust_score']}/100 — {result['verdict']}")
+print(f"Factual status: {result['truth_status']} ({result['evidence_basis']} · {result['proof_level']})")
 
 # Batch verify
 results = aether.batch_verify([

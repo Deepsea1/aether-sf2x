@@ -141,11 +141,17 @@ const bench = await r.json();` },
           <pre className="text-xs text-slate-300 font-mono bg-black/30 rounded-lg p-3">{`{
   "trust_score": 42,
   "verdict": "contested",
+  "truth_status": "UNKNOWN",
+  "evidence_basis": "MODEL_ASSESSED",
+  "proof_level": "L1",
+  "integrity_status": "UNSEALED",
+  "action_authorization": "NOT_AUTHORIZED",
   "corrections": ["Vitamin C does not prevent colds in the general population..."],
   "claims": [{ "claim": "...", "supported": false }],
   "warrant_id": "...",
   "tribunal_url": "/verify/<id>"
 }`}</pre>
+          <p className="mt-3 text-xs text-amber-200/80">The fast endpoint’s <code>trust_score</code> and <code>verdict</code> are legacy model-assessment labels. They do not establish factual verification or authorize an action; use the five canonical fields above.</p>
         </div>
         <CodeTabs examples={verifyExamples} />
 

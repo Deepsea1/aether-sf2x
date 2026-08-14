@@ -30,11 +30,20 @@ import { callAnthropic, isClaudeModel } from '../../shared/anthropic.js';
 import { tribunalCaveat } from '../../shared/caveat.js';
 import { persistClaimsAndEvidence } from '../../shared/claimPersistence.js';
 import { buildWarrantV2Payload, signWarrantV2, sha256Hex } from '../../shared/canonicalSign.js';
+import { exposeTruthDecision, modelAssessedDecision } from '../../shared/truthContract.js';
 
 const VALID_DOMAINS = ['General', 'Medicine', 'Finance', 'Legal', 'HR', 'Engineering', 'Science'];
 const VALID_STAKES = ['low', 'medium', 'high', 'critical'];
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
+
+function tribunalModelDecision(mode) {
+  return modelAssessedDecision({
+    policyId: `inquire-tribunal-${mode}-model-assessment`,
+    policyVersion: '1',
+    missingEvidence: ['The tribunal result has not completed an independent evidence evaluation.'],
+  });
+}
 
 // OpenRouter → Base44 fallback for the single-model warranted-answer path.
 async function _orSingleFallback(svc, prompt, model) {
@@ -76,9 +85,10 @@ async function singleMode(base44, svc, { prompt, domain, stakes, model, traceId,
   const inquiry = await base44.entities.Inquiry.create({ prompt, domain, stakes_level: stakes, status: 'answered' });
   const existing = await base44.entities.AnswerVersion.filter({ inquiry_id: inquiry.id });
   const version = existing.length + 1;
+  const truthDecision = tribunalModelDecision('single');
   const av = await base44.entities.AnswerVersion.create({
     inquiry_id: inquiry.id, version, answer_text: r.answer || '',
-    cognitive_state: { ...(r.cognitive_state || {}), model, source: 'console_single' },
+    cognitive_state: { ...(r.cognitive_state || {}), model, source: 'console_single', truth_decision: truthDecision },
     metrics: r.metrics || {}, trust_score: computeTrustworthyRate(r.metrics, w), stakes_level: stakes,
   });
   const expiryDays = w.expiry_days || 30;
@@ -119,6 +129,7 @@ async function singleMode(base44, svc, { prompt, domain, stakes, model, traceId,
 // Persist the final lineage bookkeeping shared by both modes.
 async function finish(base44, svc, ctx) {
   const { inquiry, version, warrant, candidates, tribunal, certified, certification, traceId, origin } = ctx;
+  const truthDecision = version.cognitive_state?.truth_decision || tribunalModelDecision(tribunal?.mode || 'unknown');
   await emitTelemetry(svc, {
     trace_id: traceId, event_type: 'provenance_signed', span_type: 'provenance', group: 'provenance',
     linked_entity_type: 'AnswerVersion', linked_entity_id: version.id,
@@ -142,6 +153,7 @@ async function finish(base44, svc, ctx) {
     trustworthy_rate: version.trust_score,
     verifier_caveat: tribunalCaveat({ crossFirmVerified: !!tribunal?.cross_firm_verified }),
     verification_url: origin ? `${origin}/verify/${version.id}` : `/verify/${version.id}`,
+    ...exposeTruthDecision(truthDecision),
   });
 }
 
@@ -217,9 +229,10 @@ async function fastMode(base44, svc, { prompt, domain, stakes, models, traceId, 
   const inquiry = await base44.entities.Inquiry.create({ prompt, domain, stakes_level: stakes, status: 'answered' });
   const existing = await base44.entities.AnswerVersion.filter({ inquiry_id: inquiry.id });
   const version = existing.length + 1;
+  const truthDecision = tribunalModelDecision('fast');
   const av = await base44.entities.AnswerVersion.create({
     inquiry_id: inquiry.id, version, answer_text: hardenedAnswer,
-    cognitive_state: { model: 'fast:' + duo.join(','), source: 'console_fast', duo, verifier: [usedVerifier], supported_claims: ver.supported, claim_count: ver.total, falsifier: ver.falsification?.falsification_strength || null },
+    cognitive_state: { model: 'fast:' + duo.join(','), source: 'console_fast', truth_decision: truthDecision, duo, verifier: [usedVerifier], supported_claims: ver.supported, claim_count: ver.total, falsifier: ver.falsification?.falsification_strength || null },
     metrics, trust_score: ver.trust, stakes_level: stakes,
   });
   const sourceSnapshots = await snapshotSources(sources);
@@ -486,9 +499,10 @@ export default async function(req) {
     const inquiry = await base44.entities.Inquiry.create({ prompt, domain, stakes_level: stakes, status: 'answered', grounding_doc_ids: groundingDocIds || [] });
     const existing = await base44.entities.AnswerVersion.filter({ inquiry_id: inquiry.id });
     const version = existing.length + 1;
+    const truthDecision = tribunalModelDecision('tribunal');
     const av = await base44.entities.AnswerVersion.create({
       inquiry_id: inquiry.id, version, answer_text: hardenedAnswer,
-      cognitive_state: { model: 'tribunal:' + trio.join(','), source: 'console_tribunal', trio, verifier: verifierModels, consensus, merge_notes: verdict.merge_notes || '', supported_claims: ver.supported, claim_count: ver.total, falsifier: ver.falsification?.falsification_strength || null, cross_firm_verified: !!ver.cross_firm_verified },
+      cognitive_state: { model: 'tribunal:' + trio.join(','), source: 'console_tribunal', truth_decision: truthDecision, trio, verifier: verifierModels, consensus, merge_notes: verdict.merge_notes || '', supported_claims: ver.supported, claim_count: ver.total, falsifier: ver.falsification?.falsification_strength || null, cross_firm_verified: !!ver.cross_firm_verified },
       metrics, trust_score: ver.trust, stakes_level: stakes,
     });
     const sourceSnapshots = await snapshotSources(sources);

@@ -16,7 +16,16 @@ const require = createRequire(import.meta.url);
 const mod = require('./aether_sdk.js');
 const { AetherClient, AetherError, NotDeployedError, DEFAULT_BASE_URL } = mod;
 
-const OK = { trust_score: 91, verdict: 'verified', corrections: [] };
+const OK = {
+  trust_score: 91,
+  verdict: 'verified',
+  corrections: [],
+  truth_status: 'UNKNOWN',
+  evidence_basis: 'MODEL_ASSESSED',
+  proof_level: 'L1',
+  integrity_status: 'UNSEALED',
+  action_authorization: 'NOT_AUTHORIZED',
+};
 const okFetch = async () => ({ ok: true, status: 200, json: async () => OK });
 
 describe('exports — both documented import styles work', () => {
@@ -74,6 +83,11 @@ describe('verify', () => {
     const out = await c.verify('some text');
     assert.match(url, /\/verifyResponse$/);
     assert.equal(out.trust_score, 91);
+    assert.equal(out.truth_status, 'UNKNOWN');
+    assert.equal(out.evidence_basis, 'MODEL_ASSESSED');
+    assert.equal(out.proof_level, 'L1');
+    assert.equal(out.integrity_status, 'UNSEALED');
+    assert.equal(out.action_authorization, 'NOT_AUTHORIZED');
   });
 
   test('rejects empty text before making a request', async () => {

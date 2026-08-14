@@ -70,6 +70,11 @@ Verify a single text response for hallucinations.
 {
   "trust_score": 40,
   "verdict": "contested",
+  "truth_status": "UNKNOWN",
+  "evidence_basis": "MODEL_ASSESSED",
+  "proof_level": "L1",
+  "integrity_status": "UNSEALED",
+  "action_authorization": "NOT_AUTHORIZED",
   "corrections": [
     "Cite the specific employer and provide the exact text or link to Section 4.1...",
     "Do not state absolute standards across all companies..."
@@ -87,6 +92,10 @@ Verify a single text response for hallucinations.
   "latency_ms": 14255
 }
 ```
+
+`trust_score` and legacy `verdict` are model-assessment display fields on this
+fast path. They do not establish a factual `VERIFIED` status and never authorize
+an action. Use the five canonical truth fields for decisions.
 
 **Example (curl):**
 ```bash
@@ -269,6 +278,11 @@ Verify text and send results to a webhook URL (async pattern).
     "verification_id": "vrf_1234567890",
     "trust_score": 85,
     "verdict": "verified",
+    "truth_status": "UNKNOWN",
+    "evidence_basis": "MODEL_ASSESSED",
+    "proof_level": "L1",
+    "integrity_status": "UNSEALED",
+    "action_authorization": "NOT_AUTHORIZED",
     "flags": [],
     "timestamp": "2026-08-01T12:00:00.000Z"
   }

@@ -141,6 +141,15 @@ export function claimGateClass(claim) {
 export function evaluateGateV2(result, { mode = 'advisory', threshold = 80, failOnContested = false } = {}) {
   const gateMode = mode === 'enforcing' ? 'enforcing' : 'advisory';
 
+  // An explicit model-only label is stronger evidence than a legacy score. It
+  // cannot authorize an enforcing CI decision; advisory mode reports the gap.
+  if (result?.truth_status === 'UNKNOWN' && result?.evidence_basis === 'MODEL_ASSESSED') {
+    const message = 'Aether: model-assessed result only (UNKNOWN / L1); no factual verification is available.';
+    return gateMode === 'enforcing'
+      ? { failed: true, level: 'error', message, mode: gateMode, usedDispositions: false, blockedCount: 0, reviewCount: 0 }
+      : { failed: false, level: 'warning', message, mode: gateMode, usedDispositions: false, blockedCount: 0, reviewCount: 0 };
+  }
+
   if (hasClaimDispositions(result)) {
     const claims = result.claims;
     const blockedCount = claims.filter((c) => claimGateClass(c) === 'blocked').length;

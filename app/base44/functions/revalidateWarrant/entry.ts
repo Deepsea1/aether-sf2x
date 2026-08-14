@@ -3,6 +3,7 @@ import { resolveApiKey } from '../../shared/apiAuth.js';
 import { runVerification, snapshotSources } from '../../shared/attest.js';
 import { computeTrustworthyRate } from '../../shared/sf2xCore.js';
 import { emitTelemetry, newTraceId } from '../../shared/telemetry.js';
+import { createTruthDecision, exposeTruthDecision, modelAssessedDecision } from '../../shared/truthContract.js';
 
 // Re-validate a previously attested answer against the live web. Trust is not
 // static: sources rot, facts change. This re-runs the verification pass, measures
@@ -121,6 +122,23 @@ export default async function(req) {
       || (originalValidity === 'valid' && newValidity !== 'valid');
     const driftScore = Math.min(1, Math.abs(trustDelta) / 100 + (downgraded ? 0.3 : 0) + (expired ? 0.2 : 0) + (sourceRot.changed > 0 ? 0.25 : 0));
     const drifted = driftScore >= 0.1 || downgraded || expired || sourceRot.changed > 0;
+    const storedDecision = av.cognitive_state?.truth_decision || modelAssessedDecision({
+      policyId: 'revalidate-warrant-model-assessment',
+      policyVersion: '1',
+      missingEvidence: ['The original answer version has no independently evaluated factual decision.'],
+    });
+    const truthDecision = createTruthDecision({
+      ...storedDecision,
+      integrity_status: sourceRot.changed > 0 ? 'UNAVAILABLE' : storedDecision.integrity_status,
+      action_authorization: (sourceRot.changed > 0 || expired) ? 'NOT_AUTHORIZED' : storedDecision.action_authorization,
+      policy_id: 'revalidate-warrant-integrity',
+      policy_version: '1',
+      satisfied_rules: sourceRot.changed > 0 ? [] : ['revalidation_completed'],
+      failed_rules: [
+        ...(sourceRot.changed > 0 ? ['source_content_changed_since_attestation'] : []),
+        ...(expired ? ['warrant_expired'] : []),
+      ],
+    });
 
     let severity = 'minor';
     if (driftScore >= 0.5 || newValidity === 'invalid') severity = 'critical';
@@ -142,7 +160,10 @@ export default async function(req) {
       }).catch(() => {});
 
       await svc.entities.Warrant.update(warrant.id, { validity_status: newValidity }).catch(() => {});
-      await svc.entities.AnswerVersion.update(av.id, { trust_score: ver.trust }).catch(() => {});
+      await svc.entities.AnswerVersion.update(av.id, {
+        trust_score: ver.trust,
+        cognitive_state: { ...(av.cognitive_state || {}), truth_decision: truthDecision },
+      }).catch(() => {});
 
       await svc.entities.AuditLog.create({
         event_type: 'drift_alert',
@@ -179,6 +200,7 @@ export default async function(req) {
       claims: ver.claims,
       issues: ver.issues,
       support_ratio: ver.supportRatio,
+      ...exposeTruthDecision(truthDecision),
     });
   } catch (error) {
     console.error('revalidateWarrant error', error);

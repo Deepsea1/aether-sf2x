@@ -4,6 +4,7 @@ import { resolveApiKey, checkQuota, recordUsage, CREDIT_COSTS } from '../../shar
 import { attestAnswer } from '../../shared/attest.js';
 import { runRedTeamAttack } from '../../shared/redTeam.js';
 import { recordUserEvent } from '../../shared/userMetrics.js';
+import { exposeTruthDecision, modelAssessedDecision } from '../../shared/truthContract.js';
 
 // Inbound Warrant API — businesses submit an AI-generated answer (with optional
 // claimed premises/sources) and receive an independent attestation: atomic-claim
@@ -52,7 +53,12 @@ export default async function(req) {
       linked_entity_type: 'AnswerVersion', linked_entity_id: result.lineage_id,
       metadata: { warrant_id: result.warrant_id, certified, red_team_outcome: redTeam.outcome },
     });
-    return Response.json({ ...result, certified, certification: certified ? 'certified' : 'uncertified', red_team: { outcome: redTeam.outcome, severity: redTeam.severity, run_id: redTeam.run?.id || null } });
+    const truthDecision = result.truth_decision || modelAssessedDecision({
+      policyId: 'warrant-api-model-assessment',
+      policyVersion: '1',
+      missingEvidence: ['The attestation result did not include an independent evidence decision.'],
+    });
+    return Response.json({ ...result, certified, certification: certified ? 'certified' : 'uncertified', red_team: { outcome: redTeam.outcome, severity: redTeam.severity, run_id: redTeam.run?.id || null }, ...exposeTruthDecision(truthDecision) });
   } catch (error) {
     console.error('warrantApi error', error);
     return Response.json({ error: error.message }, { status: error.status || 500 });

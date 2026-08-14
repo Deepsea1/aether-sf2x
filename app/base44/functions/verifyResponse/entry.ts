@@ -6,6 +6,7 @@ import { PIPELINE_VERSION, textReuseKey, lookupVerdict, storeVerdict, recordHit 
 import { buildWarrantV2Payload, signWarrantV2, sha256Hex, buildPublicWarrantPayload, signPublicWarrant } from '../../shared/canonicalSign.js';
 import { getActiveMode } from '../../shared/serviceMode.js';
 import { normalizeClaims, premisesFrom } from '../../shared/claimShape.js';
+import { modelAssessedDecision, exposeTruthDecision } from '../../shared/truthContract.js';
 
 // verifyResponse — the fast verification endpoint behind the Aether widget and
 // browser extension. Accepts an AI-generated text and runs a single fast
@@ -132,9 +133,14 @@ export default async function (req) {
         if (hit) {
           await recordHit(svc, hit);
           const cache_age_seconds = Math.max(0, Math.round((Date.now() - new Date(hit.created_date || Date.now()).getTime()) / 1000));
+          const truthDecision = hit.payload?.truth_decision || modelAssessedDecision({
+            claim_id: hit.payload?.lineage_id || hit.payload?.warrant_id || 'cached-verification',
+            policy_id: 'verify-response-model-assessment', policy_version: '1',
+            missing_evidence: ['retrieved applicable evidence required for a final factual status'],
+          });
           // modeStamp spreads AFTER the stored payload so a cache hit reports
           // the mode active NOW, not the one frozen at store time.
-          return Response.json({ ...hit.payload, ...modeStamp, cached: true, cache_age_seconds });
+          return Response.json({ ...hit.payload, ...exposeTruthDecision(truthDecision), ...modeStamp, cached: true, cache_age_seconds });
         }
       } catch (e) { /* cache miss is non-fatal */ }
     }
@@ -297,6 +303,15 @@ Respond as a single JSON object.`;
       metrics: { support_ratio: claims.length ? claims.filter((c) => c.supported).length / claims.length : 0 },
       trust_score, stakes_level: 'medium',
     });
+    // The fast path uses one model assessment and has not retrieved, normalized,
+    // or evaluated evidence for entailment. Its legacy score/verdict remain for
+    // compatibility only; the canonical result is deliberately UNKNOWN at L1.
+    const truthDecision = modelAssessedDecision({
+      claim_id: av.id,
+      policy_id: 'verify-response-model-assessment',
+      policy_version: '1',
+      missing_evidence: ['retrieved applicable evidence required for a final factual status'],
+    });
     const premises = premisesFrom(claims);
     const conclusion = (v.summary || text.slice(0, 500));
     const warrant = await svc.entities.Warrant.create({
@@ -378,6 +393,7 @@ Respond as a single JSON object.`;
     // returns this verbatim with no LLM call next time.
     const out = {
       trust_score, verdict, corrections, claims: claimsOut, flags,
+      ...exposeTruthDecision(truthDecision),
       warrant_id: warrant.id, tribunal_url: `/verify/${av.id}`, lineage_id: av.id,
       latency_ms, tribunal_version: PIPELINE_VERSION, domain, byok: !!ownKey,
       certified, certification: certified ? 'certified' : 'uncertified',
@@ -386,7 +402,7 @@ Respond as a single JSON object.`;
     };
     await svc.entities.AnswerVersion.update(av.id, {
       warrant_id: warrant.id,
-      cognitive_state: { source, verdict, latency_ms, claim_count: claims.length, correction_count: corrections.length, flags, byok: !!ownKey, certified, red_team_run_id: redTeam.run?.id || null, red_team_outcome: redTeam.outcome, red_team_severity: redTeam.severity, cache_payload: out },
+      cognitive_state: { source, verdict, truth_decision: truthDecision, latency_ms, claim_count: claims.length, correction_count: corrections.length, flags, byok: !!ownKey, certified, red_team_run_id: redTeam.run?.id || null, red_team_outcome: redTeam.outcome, red_team_severity: redTeam.severity, cache_payload: out },
     }).catch(() => {});
 
     // Exact-hash reuse store — the SAME out payload a hit returns verbatim.

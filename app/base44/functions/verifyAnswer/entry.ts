@@ -3,6 +3,7 @@ import { secrets } from 'base44:runtime';
 import { verifySignature, signatureScheme, computeTrustworthyRate } from '../../shared/sf2xCore.js';
 import { isCertifiedRun } from '../../shared/redTeam.js';
 import { buildWarrantV2Payload, verifyWarrantV2 } from '../../shared/canonicalSign.js';
+import { createTruthDecision, exposeTruthDecision, modelAssessedDecision } from '../../shared/truthContract.js';
 
 // PUBLIC AND UNAUTHENTICATED BY DESIGN — this is not a missing auth check.
 // It backs the public proof surface (/verify/:id, Registry, WarrantProof, Badge,
@@ -79,6 +80,20 @@ export default async function (req) {
     // inbound-attestation lineages that skipped red-team are uncertified.
     const redTeamRuns = await svc.entities.RedTeamRun.filter({ target_id: av.id }).catch(() => []);
     const certified = isCertifiedRun(av, redTeamRuns);
+    const storedDecision = av.cognitive_state?.truth_decision || modelAssessedDecision({
+      policyId: 'public-warrant-model-assessment',
+      policyVersion: '1',
+      missingEvidence: ['The answer version has no independently evaluated factual decision.'],
+    });
+    const truthDecision = createTruthDecision({
+      ...storedDecision,
+      integrity_status: signature_valid ? 'VERIFIED' : 'UNAVAILABLE',
+      action_authorization: signature_valid ? storedDecision.action_authorization : 'NOT_AUTHORIZED',
+      policy_id: 'public-warrant-integrity-check',
+      policy_version: '1',
+      satisfied_rules: signature_valid ? ['warrant_signature_reconstructed_and_verified'] : [],
+      failed_rules: signature_valid ? [] : ['warrant_signature_unavailable_or_invalid'],
+    });
 
     return Response.json({
       answer_version_id: av.id,
@@ -114,6 +129,7 @@ export default async function (req) {
       certified,
       certification: certified ? 'certified' : 'uncertified',
       verified_at: new Date().toISOString(),
+      ...exposeTruthDecision(truthDecision),
     });
   } catch (error) {
     console.error('verifyAnswer error', error);
