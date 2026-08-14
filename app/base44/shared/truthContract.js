@@ -94,4 +94,3 @@ export function modelAssessedDecision(input = {}) {
     action_authorization: 'NOT_AUTHORIZED',
   });
 }
-

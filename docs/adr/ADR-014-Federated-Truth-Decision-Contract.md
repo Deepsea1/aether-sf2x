@@ -1,6 +1,6 @@
 # ADR-014: Federated truth-decision contract
 
-**Status:** Accepted  
+**Status:** Accepted
 **Date:** 2026-08-14
 
 ## Context

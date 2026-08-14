@@ -42,4 +42,3 @@ test('integrity failure blocks authorization without rewriting factual status', 
   assert.equal(out.action_authorization, 'NOT_AUTHORIZED');
   assert.ok(out.violations.includes('integrity_failure_blocks_action_authorization'));
 });
-
