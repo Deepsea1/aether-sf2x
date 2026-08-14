@@ -59,6 +59,9 @@ unsealed aggregate and explicitly reports `integrity_status: UNAVAILABLE`.
 The public `verifyAnswer` surface now reports a reconstructed valid warrant
 signature as `integrity_status: VERIFIED`, without promoting the underlying
 factual state.
+`revalidateWarrant` retains the factual decision while a changed source makes
+the attested evidence unavailable and removes action authorization; it does not
+rewrite factual status from a model re-check.
 
 Local deterministic evidence for the current contract slice:
 
