@@ -94,3 +94,17 @@ export function modelAssessedDecision(input = {}) {
     action_authorization: 'NOT_AUTHORIZED',
   });
 }
+
+// Response adapters expose the five dimensions at stable top-level keys while
+// retaining the full versioned record for consumers that need rule details.
+export function exposeTruthDecision(decision) {
+  const d = createTruthDecision(decision);
+  return {
+    truth_decision: d,
+    truth_status: d.truth_status,
+    evidence_basis: d.evidence_basis,
+    proof_level: d.proof_level,
+    integrity_status: d.integrity_status,
+    action_authorization: d.action_authorization,
+  };
+}

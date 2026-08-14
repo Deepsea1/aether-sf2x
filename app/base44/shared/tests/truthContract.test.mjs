@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTruthDecision, modelAssessedDecision, TRUTH_DECISION_SCHEMA } from '../truthContract.js';
+import { createTruthDecision, modelAssessedDecision, exposeTruthDecision, TRUTH_DECISION_SCHEMA } from '../truthContract.js';
 
 test('model-only assessment remains UNKNOWN at L1 and cannot authorize action', () => {
   const out = modelAssessedDecision({ claim_id: 'c1', policy_id: 'general-v1', policy_version: '1' });
@@ -41,4 +41,14 @@ test('integrity failure blocks authorization without rewriting factual status', 
   assert.equal(out.proof_level, 'L5');
   assert.equal(out.action_authorization, 'NOT_AUTHORIZED');
   assert.ok(out.violations.includes('integrity_failure_blocks_action_authorization'));
+});
+
+test('response adapter exposes all five dimensions without flattening their meaning', () => {
+  const out = exposeTruthDecision(modelAssessedDecision({ claim_id: 'c1' }));
+  assert.equal(out.truth_decision.schema, TRUTH_DECISION_SCHEMA);
+  assert.equal(out.truth_status, 'UNKNOWN');
+  assert.equal(out.evidence_basis, 'MODEL_ASSESSED');
+  assert.equal(out.proof_level, 'L1');
+  assert.equal(out.integrity_status, 'UNSEALED');
+  assert.equal(out.action_authorization, 'NOT_AUTHORIZED');
 });
