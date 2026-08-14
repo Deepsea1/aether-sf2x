@@ -67,8 +67,9 @@ Local deterministic evidence for the current contract slice:
 
 ## Next smallest safe task
 
-Audit and migrate the tribunal-specific response paths and their persisted
-warrants. Then add SDK and browser-extension consumer tests/labels before
-considering any legacy-field removal. Base44 app build, lint, typecheck, and
-staging/live gates remain open; no deployment or production verification has
-occurred.
+Audit all remaining factual-serving paths, including warrant retrieval and
+correction/revocation flows, before considering any legacy-field removal. The
+SDK preserves and tests all five fields; the browser extension now presents
+factual status, integrity, and action authorization separately from its model
+assessment score. Base44 app build, lint, typecheck, and staging/live gates
+remain open; no deployment or production verification has occurred.

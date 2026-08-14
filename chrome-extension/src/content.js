@@ -169,13 +169,13 @@
     let color, label;
     if (score >= 75) {
       color = '#22c55e';
-      label = `✓ Verified ${score}/100`;
+      label = `✓ Assessment ${score}/100`;
     } else if (score >= 50) {
       color = '#eab308';
-      label = `⚠ Contested ${score}/100`;
+      label = `⚠ Assessment ${score}/100`;
     } else {
       color = '#ef4444';
-      label = `✗ Rejected ${score}/100`;
+      label = `✗ Assessment ${score}/100`;
     }
 
     btn.textContent = label;
@@ -209,8 +209,11 @@
       ? result.corrections.filter(c => typeof c === 'string')
       : [];
 
-    let color = score >= 75 ? '#22c55e' : score >= 50 ? '#eab308' : '#ef4444';
-    let verdictLabel = score >= 75 ? 'Verified' : score >= 50 ? 'Contested' : 'Rejected';
+    const color = score >= 75 ? '#22c55e' : score >= 50 ? '#eab308' : '#ef4444';
+    const verdictLabel = score >= 75 ? 'Model assessment: supported' : score >= 50 ? 'Model assessment: contested' : 'Model assessment: rejected';
+    const truthStatus = typeof result.truth_status === 'string' ? result.truth_status : 'UNKNOWN';
+    const evidenceBasis = typeof result.evidence_basis === 'string' ? result.evidence_basis : 'UNEXAMINED';
+    const proofLevel = typeof result.proof_level === 'string' ? result.proof_level : 'L0';
 
     const card = document.createElement('div');
     card.className = 'aether-verdict-card';
@@ -247,18 +250,25 @@
 
     const subtitle = document.createElement('div');
     subtitle.style.cssText = 'color: #64748b; font-size: 12px;';
-    subtitle.textContent = 'Verified by 3-model tribunal (proposer → critic → verifier)';
+    subtitle.textContent = `Factual status: ${truthStatus} (${evidenceBasis} · ${proofLevel})`;
     card.appendChild(subtitle);
+
+    const authorization = typeof result.action_authorization === 'string' ? result.action_authorization : 'NOT_AUTHORIZED';
+    const integrity = typeof result.integrity_status === 'string' ? result.integrity_status : 'UNAVAILABLE';
+    const truthMeta = document.createElement('div');
+    truthMeta.style.cssText = 'margin-top: 2px; color: #64748b; font-size: 11px;';
+    truthMeta.textContent = `Integrity: ${integrity} · Action: ${authorization}`;
+    card.appendChild(truthMeta);
 
     const stamp = document.createElement('div');
     stamp.className = 'aether-stamp';
     stamp.style.cssText = 'margin-top: 4px; color: #94a3b8; font-size: 11px;';
     if (result.cached === true) {
       // Cache hits from verifyResponse are labeled honestly rather than re-stamped
-      stamp.textContent = `Cached result (age ${humanizeCacheAge(result.cache_age_seconds)}) — verified content unchanged since first check`;
+      stamp.textContent = `Cached assessment (age ${humanizeCacheAge(result.cache_age_seconds)}) — reflects the text at its first assessment`;
     } else {
       const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      stamp.textContent = `Verified ${time} — reflects the text at verification time`;
+      stamp.textContent = `Assessed ${time} — model output is not independent factual verification`;
     }
     card.appendChild(stamp);
 
