@@ -126,6 +126,9 @@ export default function VerdictSeal({ result, reduced, className }) {
               <span className="text-[12px]" style={{ color: TEXT.muted }}>
                 tribunal verdict: <code className="font-mono" style={{ color: TEXT.secondary }}>{result.verdict || 'unstated'}</code>
               </span>
+              {result.truth_status ? <span className="text-[12px]" style={{ color: TEXT.muted }}>
+                factual status: <code className="font-mono" style={{ color: TEXT.secondary }}>{result.truth_status}</code> ({result.evidence_basis || 'UNEXAMINED'} · {result.proof_level || 'L0'})
+              </span> : null}
             </div>
             <p className="mt-2 max-w-xl text-[11.5px] leading-relaxed" style={{ color: TEXT.muted }}>
               {token.meaning}

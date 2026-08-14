@@ -2,6 +2,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { resolveApiKey, checkQuota, recordUsage, CREDIT_COSTS } from '../../shared/apiAuth.js';
 import { normalizeClaims, premisesFrom } from '../../shared/claimShape.js';
 import { buildWarrantV2Payload, signWarrantV2, sha256Hex, buildPublicWarrantPayload, signPublicWarrant } from '../../shared/canonicalSign.js';
+import { modelAssessedDecision, exposeTruthDecision } from '../../shared/truthContract.js';
 
 // streamVerify — Server-Sent Events endpoint that streams a verification
 // verdict progressively: analyzing → per-claim → verdict → done. Same fast
@@ -103,6 +104,13 @@ Decompose the text into discrete factual claims, judge each as supported or unsu
             metrics: { support_ratio: claims.length ? claims.filter((c) => c.supported).length / claims.length : 0 },
             trust_score, stakes_level: 'medium',
           });
+          // Streaming changes transport, not epistemic authority. This remains
+          // a model-only fast assessment until the evidence pipeline is present.
+          const truthDecision = modelAssessedDecision({
+            claim_id: av.id,
+            policy_id: 'stream-verify-model-assessment', policy_version: '1',
+            missing_evidence: ['retrieved applicable evidence required for a final factual status'],
+          });
           const premises = premisesFrom(claims);
           const conclusion = (v.summary || text.slice(0, 500));
           const warrant = await svc.entities.Warrant.create({
@@ -112,7 +120,10 @@ Decompose the text into discrete factual claims, judge each as supported or unsu
             sources: [], expiry_date: new Date(Date.now() + 30 * 86400000).toISOString(),
             description: `Stream verification · ${verdict} · ${latency_ms}ms`,
           });
-          await svc.entities.AnswerVersion.update(av.id, { warrant_id: warrant.id }).catch(() => {});
+          await svc.entities.AnswerVersion.update(av.id, {
+            warrant_id: warrant.id,
+            cognitive_state: { source, verdict, truth_decision: truthDecision, latency_ms, claim_count: claims.length },
+          }).catch(() => {});
           // Seal the warrant — mirrors verifyResponse/webhookVerify exactly.
           // This path previously stored NO signature of any kind, so its
           // warrants read as signature_scheme 'none' in the registry. Two
@@ -165,7 +176,7 @@ Decompose the text into discrete factual claims, judge each as supported or unsu
           } catch (e) { console.error('warrant v2 signing failed', e?.message || e); }
           if (apiKey) await recordUsage(svc, apiKey, 'verifyResponse', CREDIT_COSTS.verifyResponse || 2, { inquiry_id: inquiry.id });
 
-          send({ stage: 'verdict', trust_score, verdict, corrections, summary: v.summary || '', warrant_id: warrant.id, tribunal_url: `/verify/${av.id}`, latency_ms });
+          send({ stage: 'verdict', trust_score, verdict, ...exposeTruthDecision(truthDecision), corrections, summary: v.summary || '', warrant_id: warrant.id, tribunal_url: `/verify/${av.id}`, latency_ms });
           send({ stage: 'done', tribunal_url: `/verify/${av.id}` });
         } catch (e) {
           send({ stage: 'error', error: e?.message || 'verification failed' });
