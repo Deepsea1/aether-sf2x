@@ -135,7 +135,7 @@ jobs:
       # ever imported lazily). These tests lock the fail-closed contracts the
       # warrant pipeline depends on.
       - name: Run shared-module tests
-        run: node --test "app/base44/shared/tests/*.test.mjs"
+        run: node --test app/base44/shared/tests/*.test.mjs
 
       # The live-verification suite ships in the repo (it replaced the ad-hoc
       # session harnesses). No network here — just keep it loadable.
